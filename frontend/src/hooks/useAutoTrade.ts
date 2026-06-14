@@ -139,3 +139,32 @@ export function useScreenStocks() {
       api.post("/auto-trade/screen", payload).then((r) => r.data),
   });
 }
+
+export interface QuickStartPayload {
+  strategy_type: "trend_following" | "mean_reversion" | "momentum" | "breakout" | "scalping" | "swing";
+  symbols?: string[];
+  timeframe?: string;
+  exchange?: string;
+  mode?: "paper" | "live";
+  trading_capital?: number;
+  max_position_size_pct?: number;
+}
+
+export interface QuickStartResponse {
+  message: string;
+  strategy: { id: string; name: string; strategy_type: string; symbols: string[]; indicators: string[] };
+  engine: EngineStatus;
+}
+
+export function useQuickStart() {
+  const qc = useQueryClient();
+  return useMutation<QuickStartResponse, Error, QuickStartPayload>({
+    mutationFn: (payload) =>
+      api.post("/auto-trade/quick-start", payload).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auto-trade-status"] });
+      qc.invalidateQueries({ queryKey: ["auto-trade-risk"] });
+      qc.invalidateQueries({ queryKey: ["strategies"] });
+    },
+  });
+}

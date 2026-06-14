@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 2 backend testing of the 4 new TradeAI features. 14/16 tests passed (87.5%) + 1 skipped due to upstream (yfinance) unavailability. Quick Start works end-to-end for all 6 strategy_types (trend_following/mean_reversion/momentum/breakout/swing/scalping) — LLM generates the strategy in ~13-15s, persists to DB, starts the engine, and returns the new strategy id + engine status. Broker flows verified (status empty list, Angel One empty-fields rejected, Zerodha returns kite.zerodha.com login_url, /brokers/debug returns dict). Regression endpoints (login, GET /strategy, /auto-trade/status, /orders/) all green. PG candle cache code path is implemented correctly (cache_hit -> Redis -> PG -> yfinance -> synthetic) but cannot be exercised because yfinance.download is blocked from this container (JSONDecodeError, 0 rows). SSE generate-stream works correctly when called against localhost:8001 (first status event in <100ms, full event stream visible), but public ingress BUFFERS the response — no bytes returned in 5s through the preview URL even though backend yields immediately. This is an ingress/proxy issue, not a backend bug.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/v1/strategy/generate-stream",
+        "issue": "Backend correctly streams SSE events (verified via curl to localhost:8001 — first 'event: status' arrives in <100ms with X-Accel-Buffering: no header). However, the public ingress in front of the preview URL BUFFERS the response: no bytes are emitted to the client for >5s. From the public URL the first status event arrives ~11s in instead of the sub-3s target. Backend has all the right headers (Cache-Control: no-cache, X-Accel-Buffering: no, Connection: keep-alive); this is a Kubernetes ingress / Cloudflare buffering issue. Possible fixes: explicitly disable proxy_buffering via ingress annotation (e.g. nginx.ingress.kubernetes.io/proxy-buffering: 'off'), set Content-Encoding: identity, or pad the first event with >4 KiB of whitespace to defeat the buffer."
+      },
+      {
+        "endpoint": "POST /api/v1/strategy/backtest (PG candle_cache)",
+        "issue": "yfinance.download('RELIANCE.NS', period=6mo) is blocked from this container (returns JSONDecodeError immediately with 0 rows). Confirmed by running yf.download() directly. Service correctly falls back to deterministic synthetic data so the endpoint returns 200, but the PG candle_cache table stays empty because synthetic data is intentionally not persisted (see backtest_service.py line ~160: `if source == 'yfinance'`). Cache row creation cannot be verified end-to-end without working yfinance egress."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter2_features.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [
+    "Disable proxy buffering for SSE on the Kubernetes ingress (e.g. annotation `nginx.ingress.kubernetes.io/proxy-buffering: \"off\"` and `nginx.ingress.kubernetes.io/proxy-read-timeout: \"120\"`). Optionally, prepend a 4096-byte padding comment line to the first SSE event so the response exceeds the buffer threshold and starts flushing. This is the only way to deliver the sub-3s perceived latency goal through the public URL.",
+    "yfinance reachability is still broken from this container — same as iteration_1. Consider: (a) seeding candle_cache from a CSV/NSE bhavcopy on startup, (b) plugging in AlphaVantage / Polygon / NSEpy as fallback before synthetic, or (c) running a one-off offline sync that loads RELIANCE/TCS/INFY/etc. for the top symbols.",
+    "PG candle_cache write path is correct but UNTESTABLE in this env until yfinance works. Recommend adding an integration test that mocks `_fetch_candles_sync` to return real-looking data and then asserts the candle_cache row is written — that would catch regressions in the persistence code without depending on Yahoo."
+  ],
+  "critical_code_review_comments": [
+    "backtest_service.fetch_candles correctly uses 3-tier cache (Redis -> PG -> yfinance -> synthetic) and only persists yfinance data, which is the right policy.",
+    "auto_trade.quick_start blocks the request thread for ~13-15s while the LLM generates the strategy. UI should show a progress state and probably use the new SSE generate-stream pattern instead of POST /quick-start for a snappier UX (or the quick-start endpoint itself should stream).",
+    "strategy.generate_strategy_stream sets X-Accel-Buffering: no which is the correct backend-side hint, but the response also needs `proxy_buffering off` at the ingress layer to actually flush. Consider also writing a >4KiB whitespace padding to defeat any client/proxy buffer.",
+    "QUICK_START_PROMPTS dict in auto_trade.py duplicates strategy-template knowledge that arguably belongs in strategy.py or a shared constants module. Minor; not blocking.",
+    "candle_cache.py model has UniqueConstraint(symbol, interval, period, exchange) — fetch_candles upsert logic correctly looks up by these 4 keys before insert. Looks good.",
+    "Engine state is still a process-global singleton (auto_trade_engine). quick_start calls auto_trade_engine.start() which would conflict if multiple users hit the endpoint concurrently. Acceptable for MVP single-user demo, but note for multi-tenant."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter2_features.py"],
+  "success_rate": {"backend": "87.5% (14/16 + 1 skipped)", "frontend": "not tested (skipped per request)"},
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test run created 5+ new strategies named 'Quick Start: ...' under demo user (one per strategy_type) — no cleanup performed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iter2 tests live in /app/backend/tests/test_iter2_features.py (uses pytest + psycopg2 to check PG candle_cache). Run with: cd /app/backend && python -m pytest tests/test_iter2_features.py -v --junitxml=/app/test_reports/pytest/iter2_results.xml. The two non-passing items are not backend defects — SSE buffering is an INGRESS issue (verified by curl to localhost:8001 which streams properly) and PG cache row creation requires yfinance to succeed which it currently doesn't (also confirmed by raw yf.download). Quick Start LLM-backed flow is reliably ~13-20s and returns 200 every time.",
+  "rca_of_the_issue": {
+    "sse_slow_first_event": "Backend yields the first 'event: status' immediately (verified locally in <100ms). The public ingress (Kubernetes/Cloudflare in front of preview URL) buffers the response body until either enough bytes have been written or the upstream closes. Since the SSE handler then waits 0-2s on asyncio.wait_for(gen_task, timeout=2.0) before yielding the next heartbeat, the buffer never fills and the client sees nothing for ~10-15s until the LLM call completes and a larger chunk flushes. Mitigation: ingress annotation `nginx.ingress.kubernetes.io/proxy-buffering: off`, or pad the first event with ~4 KiB of ':comment\\n' lines to defeat the buffer threshold (SSE comments begin with ':' and are valid).",
+    "pg_candle_cache_empty": "candle_cache table is empty because yfinance.download fails from inside this container (JSONDecodeError) — exact same egress issue as iteration_1. backtest_service correctly falls back to synthetic data so the API stays usable, but only yfinance-sourced data is persisted (by design). To verify the persistence path, either fix yfinance egress or unit-test the PG write logic with a mocked _fetch_candles_sync."
+  }
+}

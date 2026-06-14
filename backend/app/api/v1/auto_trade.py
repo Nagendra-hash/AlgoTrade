@@ -7,9 +7,12 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.users import get_current_user
+from app.core.database import get_db
 from app.models.user import User
+from app.models.strategy import Strategy, StrategyStatus
 from app.services.auto_trade_engine import auto_trade_engine
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,17 @@ class ScreenRequest(BaseModel):
     strategy_type: str = "momentum"
     min_volume: int = 100000
     limit: int = 10
+
+
+class QuickStartRequest(BaseModel):
+    """One-click auto-trade: generate strategy → deploy → start engine in one tap."""
+    strategy_type: str = Field("trend_following", pattern="^(trend_following|mean_reversion|momentum|breakout|scalping|swing)$")
+    symbols: List[str] = Field(default_factory=lambda: ["RELIANCE", "TCS", "INFY"])
+    timeframe: str = "1d"
+    exchange: str = "NSE"
+    mode: str = Field("paper", pattern="^(paper|live)$")
+    trading_capital: float = Field(100000, ge=1000)
+    max_position_size_pct: float = Field(10, ge=1, le=100)
 
 
 # ── Engine control ──────────────────────────────────────────────
@@ -137,4 +151,83 @@ async def screen_stocks(
         "candidates": candidates,
         "total": len(candidates),
         "strategy_type": req.strategy_type,
+    }
+
+
+# ── One-Click Quick Start ───────────────────────────────────────
+
+QUICK_START_PROMPTS = {
+    "trend_following": "EMA(20)/EMA(50) crossover with volume confirmation and 2% stop-loss, 4% take-profit for Indian equities",
+    "mean_reversion": "Bollinger Band mean reversion (2 std dev) with RSI(14) <30 entry filter and 1.5% trailing stop",
+    "momentum": "RSI(14) momentum strategy entering on RSI 50→70 with 3% stop-loss",
+    "breakout": "20-day high breakout with volume spike (>1.5x avg) and ATR(14) based 2x stop-loss",
+    "scalping": "5-minute VWAP scalping with 0.5% target and 0.3% stop-loss",
+    "swing": "Daily swing trade using MACD crossover + ADX>25 trend confirmation, 5% target",
+}
+
+
+@router.post("/quick-start")
+async def quick_start(
+    req: QuickStartRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One-tap auto-trading: generate AI strategy → save → deploy → start engine.
+
+    Returns the generated strategy plus the engine status so the UI can render
+    everything instantly.
+    """
+    from app.api.v1.strategy import _generate_ai
+
+    # 1. Generate strategy using Emergent LLM
+    prompt = QUICK_START_PROMPTS.get(req.strategy_type, QUICK_START_PROMPTS["trend_following"])
+    result = await _generate_ai(prompt, req.symbols, req.timeframe)
+
+    # 2. Persist strategy
+    strategy = Strategy(
+        user_id=current_user.id,
+        name=f"Quick Start: {result.get('name', req.strategy_type.title())}",
+        description=result.get("description"),
+        strategy_type=result.get("strategy_type", req.strategy_type),
+        user_prompt=prompt,
+        python_code=result.get("python_code"),
+        entry_logic=result.get("entry_logic"),
+        exit_logic=result.get("exit_logic"),
+        risk_rules=result.get("risk_rules"),
+        indicators=result.get("indicators", []),
+        parameters=result.get("parameters", {}),
+        symbols=req.symbols,
+        timeframe=req.timeframe,
+        exchange=req.exchange,
+        tags=(result.get("tags", []) or []) + ["quick-start"],
+        status=StrategyStatus.ACTIVE.value,
+        is_paper_active=(req.mode == "paper"),
+        is_live_active=(req.mode == "live"),
+        stop_loss_pct=2.0,
+        take_profit_pct=4.0,
+        trailing_stop_enabled=True,
+        trailing_stop_pct=1.5,
+        max_position_size=req.max_position_size_pct,
+    )
+    db.add(strategy)
+    await db.flush()
+
+    # 3. Apply user risk config and start engine
+    auto_trade_engine.update_risk_config({
+        "trading_capital": req.trading_capital,
+        "max_position_size_pct": req.max_position_size_pct,
+    })
+    auto_trade_engine.set_mode(req.mode)
+    auto_trade_engine.start()
+
+    return {
+        "message": f"Auto-trade engine started in {req.mode} mode with new {req.strategy_type} strategy.",
+        "strategy": {
+            "id": str(strategy.id),
+            "name": strategy.name,
+            "strategy_type": strategy.strategy_type,
+            "symbols": strategy.symbols,
+            "indicators": strategy.indicators,
+        },
+        "engine": auto_trade_engine.get_status(),
     }

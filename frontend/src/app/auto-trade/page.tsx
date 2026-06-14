@@ -6,14 +6,14 @@ import { useStrategies, useDeployStrategy } from "@/hooks/useStrategies";
 import {
   useEngineStatus, useStartEngine, useStopEngine,
   useEnginePositions, useEngineActivity, useScreenStocks,
-  useUpdateRiskConfig, useRiskConfig,
+  useUpdateRiskConfig, useRiskConfig, useQuickStart,
 } from "@/hooks/useAutoTrade";
 import { cn, getPnLColor } from "@/lib/utils";
 import {
   Zap, Play, Square, TrendingUp, TrendingDown,
   AlertCircle, CheckCircle2, RefreshCw, Search,
   Activity, Shield, BarChart2, Loader2, Settings2,
-  Target, Crosshair, XCircle,
+  Target, Crosshair, XCircle, Rocket, Sparkles,
 } from "lucide-react";
 
 const RISK_LEVELS = [
@@ -22,11 +22,23 @@ const RISK_LEVELS = [
   { id: "aggressive",   label: "Aggressive",   desc: "Max 10% per trade, 30% daily loss limit", color: "text-red-400",  bg: "bg-red-500/10",   border: "border-red-500/20", config: { max_position_size_pct: 10, max_daily_loss_pct: 30, max_open_positions: 8, max_trades_per_day: 40 } },
 ];
 
+const QUICK_PRESETS: { id: "trend_following"|"mean_reversion"|"momentum"|"breakout"|"scalping"|"swing"; label: string; desc: string; emoji: string }[] = [
+  { id: "trend_following", label: "Trend Following", desc: "EMA crossover + volume confirmation", emoji: "📈" },
+  { id: "mean_reversion",  label: "Mean Reversion",  desc: "Bollinger Bands + RSI oversold",     emoji: "⚖️" },
+  { id: "momentum",        label: "Momentum",        desc: "RSI 50→70 momentum surge",           emoji: "🚀" },
+  { id: "breakout",        label: "Breakout",        desc: "20-day high + volume spike",          emoji: "💥" },
+  { id: "swing",           label: "Swing Trade",     desc: "MACD + ADX trend strength",           emoji: "🌊" },
+];
+
 export default function AutoTradePage() {
   const [risk, setRisk]           = useState("moderate");
   const [capital, setCapital]     = useState(100000);
   const [mode, setMode]           = useState<"paper"|"live">("paper");
   const [screenType, setScreenType] = useState("momentum");
+  const [showQuickStart, setShowQuickStart] = useState(false);
+  const [quickPreset, setQuickPreset] = useState<typeof QUICK_PRESETS[number]["id"]>("trend_following");
+  const [quickResult, setQuickResult] = useState<{name: string; symbols: string[]; indicators: string[]} | null>(null);
+  const quickStart = useQuickStart();
 
   // Engine hooks
   const { data: status, isLoading: statusLoading } = useEngineStatus();
@@ -76,6 +88,14 @@ export default function AutoTradePage() {
 
           {/* Master switch */}
           <div className="flex items-center gap-3">
+            <button
+              data-testid="quick-start-btn"
+              onClick={() => { setQuickResult(null); setShowQuickStart(true); }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/20 transition-all"
+              title="Generate, deploy & launch a strategy in one tap"
+            >
+              <Rocket className="h-4 w-4" /> Quick Start
+            </button>
             <div className="flex gap-1 bg-gray-800 rounded-xl p-1 border border-gray-700">
               {(["paper","live"] as const).map((m) => (
                 <button key={m} onClick={() => setMode(m)}
@@ -422,6 +442,180 @@ export default function AutoTradePage() {
           </div>
         </div>
       </div>
+
+      {/* Quick Start Modal */}
+      {showQuickStart && (
+        <div
+          data-testid="quick-start-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => !quickStart.isPending && setShowQuickStart(false)}
+        >
+          <div
+            className="w-full max-w-xl bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-gray-800 flex items-center justify-between bg-gradient-to-r from-purple-600/10 to-pink-600/10">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <Rocket className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-white font-black">Quick Start Auto-Trader</h3>
+                  <p className="text-gray-400 text-xs">Generate, deploy & launch in one tap</p>
+                </div>
+              </div>
+              {!quickStart.isPending && (
+                <button onClick={() => setShowQuickStart(false)} className="text-gray-500 hover:text-white">
+                  <XCircle className="h-5 w-5" />
+                </button>
+              )}
+            </div>
+
+            {!quickResult ? (
+              <>
+                <div className="p-6 space-y-5">
+                  <div>
+                    <label className="text-gray-400 text-xs font-semibold uppercase tracking-wide block mb-2">Choose a strategy style</label>
+                    <div className="grid grid-cols-1 gap-2">
+                      {QUICK_PRESETS.map((p) => (
+                        <button
+                          key={p.id}
+                          data-testid={`quick-preset-${p.id}`}
+                          onClick={() => setQuickPreset(p.id)}
+                          className={cn(
+                            "flex items-center gap-3 p-3 rounded-xl border text-left transition-all",
+                            quickPreset === p.id
+                              ? "bg-purple-500/10 border-purple-500/40"
+                              : "bg-gray-800/50 border-gray-700 hover:border-gray-600",
+                          )}
+                        >
+                          <span className="text-2xl">{p.emoji}</span>
+                          <div className="flex-1">
+                            <p className="text-white font-bold text-sm">{p.label}</p>
+                            <p className="text-gray-400 text-xs">{p.desc}</p>
+                          </div>
+                          {quickPreset === p.id && <CheckCircle2 className="h-5 w-5 text-purple-400" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-gray-400 text-xs font-semibold uppercase tracking-wide block mb-2">Mode</label>
+                      <div className="flex gap-1 bg-gray-800 rounded-xl p-1 border border-gray-700">
+                        {(["paper", "live"] as const).map((m) => (
+                          <button
+                            key={m}
+                            data-testid={`quick-mode-${m}`}
+                            onClick={() => setMode(m)}
+                            className={cn(
+                              "flex-1 py-2 rounded-lg text-xs font-bold capitalize transition-all",
+                              mode === m ? (m === "live" ? "bg-orange-600 text-white" : "bg-blue-600 text-white") : "text-gray-400",
+                            )}
+                          >
+                            {m === "live" ? "🔴 Live" : "📋 Paper"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-gray-400 text-xs font-semibold uppercase tracking-wide block mb-2">Capital (₹)</label>
+                      <input
+                        data-testid="quick-capital-input"
+                        type="number"
+                        value={capital}
+                        onChange={(e) => setCapital(Number(e.target.value))}
+                        min={1000}
+                        step={1000}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+                      />
+                    </div>
+                  </div>
+
+                  {mode === "live" && (
+                    <div className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-xl p-3">
+                      <AlertCircle className="h-4 w-4 text-orange-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-orange-300/90 text-xs">
+                        Live mode trades real money. Make sure your broker is connected in Settings.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-6 py-4 bg-gray-950/50 border-t border-gray-800 flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowQuickStart(false)}
+                    disabled={quickStart.isPending}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-300 hover:text-white disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    data-testid="quick-start-launch-btn"
+                    disabled={quickStart.isPending}
+                    onClick={() =>
+                      quickStart.mutate(
+                        {
+                          strategy_type: quickPreset,
+                          mode,
+                          trading_capital: capital,
+                          max_position_size_pct: 10,
+                        },
+                        {
+                          onSuccess: (res) => setQuickResult(res.strategy),
+                        },
+                      )
+                    }
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/20 disabled:opacity-50"
+                  >
+                    {quickStart.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Generating strategy...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" /> Launch Auto-Trader
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="p-6 space-y-4">
+                <div className="flex items-center gap-3 bg-green-500/10 border border-green-500/30 rounded-xl p-4">
+                  <CheckCircle2 className="h-6 w-6 text-green-400 flex-shrink-0" />
+                  <div>
+                    <p className="text-green-400 font-bold text-sm">Auto-trader is live!</p>
+                    <p className="text-green-300/70 text-xs">{quickStart.data?.message}</p>
+                  </div>
+                </div>
+                <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400 text-xs">Strategy</span>
+                    <span className="text-white text-sm font-semibold" data-testid="quick-result-name">{quickResult.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400 text-xs">Symbols</span>
+                    <span className="text-white text-sm">{quickResult.symbols.join(", ")}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-gray-400 text-xs">Indicators</span>
+                    <span className="text-white text-sm text-right">{quickResult.indicators.join(", ")}</span>
+                  </div>
+                </div>
+                <button
+                  data-testid="quick-result-close-btn"
+                  onClick={() => { setShowQuickStart(false); setQuickResult(null); }}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  View on Dashboard
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

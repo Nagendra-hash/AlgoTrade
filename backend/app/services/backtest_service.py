@@ -94,29 +94,95 @@ def _synthetic_candles(symbol: str, interval: str, period: str) -> list:
 
 
 async def fetch_candles(symbol: str, interval: str, period: str, exchange: str = "NSE") -> list:
-    """Fetch historical candle data for backtesting with Redis caching.
+    """Fetch historical candle data for backtesting with layered caching.
 
-    Falls back to deterministic synthetic data when yfinance is unavailable
-    so the backtest engine and UI remain functional.
+    Resolution order:
+      1. Redis (hot cache, 1h TTL)
+      2. PostgreSQL candle_cache (persistent, refreshed daily)
+      3. yfinance (live fetch)
+      4. Deterministic synthetic fallback (last resort so the UI stays usable)
     """
+    from app.core.database import AsyncSessionLocal
+    from app.models.candle_cache import CandleCache
+    from sqlalchemy import select
+    from datetime import timedelta
+
     sym = symbol.upper()
     cache_key = f"backtest:candles:{exchange}:{sym}:{interval}:{period}"
 
+    # 1) Redis hot cache
     cached = await redis_get(cache_key)
     if cached:
         return cached
 
     yf_sym = NSE_TO_YF.get(sym, sym + ".NS")
+    now = datetime.now(timezone.utc)
+    # Daily candles can be cached for a day; intraday refreshes every hour
+    pg_ttl = timedelta(hours=24 if interval in ("1d", "1wk") else 1)
+
+    # 2) PostgreSQL persistent cache
+    db_row: Optional[CandleCache] = None
+    try:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(
+                select(CandleCache).where(
+                    CandleCache.symbol == sym,
+                    CandleCache.exchange == exchange,
+                    CandleCache.interval == interval,
+                    CandleCache.period == period,
+                )
+            )
+            db_row = r.scalar_one_or_none()
+            if db_row and (now - db_row.fetched_at) < pg_ttl and db_row.candles:
+                await redis_set(cache_key, db_row.candles, ttl=3600)
+                return db_row.candles
+    except Exception as e:
+        logger.warning(f"PG candle cache read failed: {e}")
+
+    # 3) Try yfinance live fetch
     loop = asyncio.get_event_loop()
     data = await loop.run_in_executor(None, _fetch_candles_sync, yf_sym, interval, period)
+    source = "yfinance"
 
+    # 4) Fallback to stale PG cache, then synthetic
     if not data:
+        if db_row and db_row.candles:
+            logger.info(f"yfinance unavailable for {yf_sym}; serving stale PG cache ({db_row.bar_count} bars)")
+            await redis_set(cache_key, db_row.candles, ttl=3600)
+            return db_row.candles
         logger.warning(f"yfinance returned no data for {yf_sym}; using synthetic fallback")
         data = _synthetic_candles(sym, interval, period)
+        source = "synthetic"
 
     if data:
-        # Cache longer for backtest data (1 hour)
         await redis_set(cache_key, data, ttl=3600)
+        # Persist to PG (only real yfinance data; not synthetic)
+        if source == "yfinance":
+            try:
+                async with AsyncSessionLocal() as db:
+                    r = await db.execute(
+                        select(CandleCache).where(
+                            CandleCache.symbol == sym,
+                            CandleCache.exchange == exchange,
+                            CandleCache.interval == interval,
+                            CandleCache.period == period,
+                        )
+                    )
+                    existing = r.scalar_one_or_none()
+                    if existing:
+                        existing.candles = data
+                        existing.bar_count = len(data)
+                        existing.fetched_at = now
+                        existing.source = source
+                    else:
+                        db.add(CandleCache(
+                            symbol=sym, exchange=exchange, interval=interval,
+                            period=period, candles=data, bar_count=len(data),
+                            fetched_at=now, source=source,
+                        ))
+                    await db.commit()
+            except Exception as e:
+                logger.warning(f"PG candle cache write failed: {e}")
     return data
 
 

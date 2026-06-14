@@ -121,6 +121,65 @@ async def generate_strategy(
     return await _generate_ai(req.prompt, req.symbols, req.timeframe)
 
 
+@router.post("/generate-stream")
+async def generate_strategy_stream(
+    req: StrategyGenerateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Stream AI strategy generation as Server-Sent Events for sub-3s perceived latency.
+
+    Emits:
+      event: status   data: {"stage": "...", "message": "..."}
+      event: result   data: {<strategy JSON>}
+      event: done     data: {}
+    """
+    async def event_stream():
+        # Emit initial events instantly so the UI updates within 100ms.
+        yield 'event: status\ndata: {"stage":"started","message":"Initializing AI engine..."}\n\n'
+        await asyncio.sleep(0)
+        yield 'event: status\ndata: {"stage":"thinking","message":"Analyzing market context and risk constraints..."}\n\n'
+
+        # Kick off the LLM call in the background while we emit heartbeats.
+        gen_task = asyncio.create_task(_generate_ai(req.prompt, req.symbols, req.timeframe))
+        heartbeat_msgs = [
+            "Designing entry & exit logic...",
+            "Selecting technical indicators...",
+            "Calibrating risk rules...",
+            "Generating runnable Python code...",
+            "Finalizing strategy parameters...",
+        ]
+        i = 0
+        while not gen_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(gen_task), timeout=2.0)
+            except asyncio.TimeoutError:
+                msg = heartbeat_msgs[i % len(heartbeat_msgs)]
+                i += 1
+                yield f'event: status\ndata: {{"stage":"thinking","message":"{msg}"}}\n\n'
+            except Exception:
+                break
+
+        try:
+            result = await gen_task
+        except Exception as e:
+            logger.error(f"SSE strategy gen failed: {e}")
+            yield 'event: error\ndata: {"message":"Strategy generation failed; using fallback."}\n\n'
+            result = FALLBACK_STRATEGY
+
+        yield "event: result\ndata: " + json.dumps(result) + "\n\n"
+        yield 'event: done\ndata: {}\n\n'
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.post("/generate-and-save", response_model=StrategyResponse)
 async def generate_and_save(
     req: StrategyGenerateRequest,
