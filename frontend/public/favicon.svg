@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="1" y="1" width="30" height="30" rx="6" fill="url(#bg)" stroke="#1e293b" stroke-width="0.5"/>
+  <!-- Chart grid line -->
+  <line x1="6" y1="22" x2="26" y2="22" stroke="#1e293b" stroke-width="0.8"/>
+  <!-- Candlestick 1 (green - up) -->
+  <rect x="9" y="13" width="3" height="9" rx="0.5" fill="#10b981"/>
+  <line x1="10.5" y1="10" x2="10.5" y2="13" stroke="#10b981" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="10.5" y1="22" x2="10.5" y2="24" stroke="#10b981" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Candlestick 2 (blue - up) -->
+  <rect x="14.5" y="10" width="3" height="12" rx="0.5" fill="url(#glow)"/>
+  <line x1="16" y1="7" x2="16" y2="10" stroke="#3b82f6" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="16" y1="22" x2="16" y2="25" stroke="#3b82f6" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Candlestick 3 (green - up) -->
+  <rect x="20" y="16" width="3" height="6" rx="0.5" fill="#10b981"/>
+  <line x1="21.5" y1="13" x2="21.5" y2="16" stroke="#10b981" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="21.5" y1="22" x2="21.5" y2="24" stroke="#10b981" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Upward trend line -->
+  <polyline points="8,23 12,18 16,11 20,15 24,9" fill="none" stroke="#f59e0b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+  <!-- Small dot at end of trend -->
+  <circle cx="24" cy="9" r="1" fill="#f59e0b" opacity="0.8"/>
+</svg>
