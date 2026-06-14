@@ -1,0 +1,49 @@
+{
+  "summary": "Comprehensive backend API testing of TradeAI platform. 20/22 tests passing (91%). All requested endpoints work correctly (auth, users, strategy CRUD, deploy, auto-trade engine start/stop/status/positions/activity/risk, market quote, portfolio, news, sentiment, alerts CRUD, orders). Two failures are caused by upstream/infrastructure issues, not backend bugs: (1) /api/v1/strategy/generate occasionally hits Cloudflare 502 because LLM (Claude Sonnet 4.6) takes 50-90s and the ingress gateway sometimes returns 502 mid-stream; the endpoint succeeds when called against localhost:8001 directly. (2) /api/v1/strategy/backtest returns 400 'No candle data available' because yfinance historical chart endpoint (range=6mo/1mo/3mo) returns empty JSON for RELIANCE.NS - Yahoo Finance rate limiting / upstream flakiness. Single-bar /market/quote still works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /health", "issue": "Health endpoint is defined at /health (no /api prefix) so it is NOT reachable via the public ingress (Cloudflare routes only /api/* to backend). Internal call to http://localhost:8001/health works fine. Recommend adding an /api/health alias for external monitoring."},
+      {"endpoint": "POST /api/v1/strategy/generate", "issue": "LLM call frequently takes 50-90s; Cloudflare ingress intermittently returns 502 before backend finishes. Add streaming/async job pattern (return 202 + polling) for production. Internal call always succeeds."},
+      {"endpoint": "POST /api/v1/strategy/backtest", "issue": "Returns 400 'No candle data available for RELIANCE (1d/6mo)' because yfinance.download(period=6mo/1mo/3mo) returns empty/JSON-decode-error. yfinance is unreliable from this container's egress; consider caching candle data or using a backup data source (NSE bhavcopy, AlphaVantage, etc.)."},
+      {"endpoint": "GET /api/v1/orders (no trailing slash)", "issue": "Route is registered as '/' which causes FastAPI to 307-redirect '/api/v1/orders' -> '/api/v1/orders/'. Through Cloudflare this drops the Authorization header on some clients (we saw 403 in Python requests). Recommend setting app = FastAPI(redirect_slashes=False) or registering both '' and '/'."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tradeai_backend.py",
+    "/app/test_reports/pytest/tradeai_results.xml"
+  ],
+  "action_items": [
+    "Make /api/v1/strategy/generate async/non-blocking (e.g. return job_id immediately + poll endpoint, or stream chunks) to avoid Cloudflare 502 gateway timeouts on long LLM calls.",
+    "Harden backtest data source: yfinance historical chart endpoint is unreliable from this container; add retry with backoff, cache historical candles in PostgreSQL, or fall back to a secondary provider.",
+    "Add an /api/health alias (or move /health under /api/) so external monitoring/uptime checks can reach it through the public ingress.",
+    "Configure FastAPI with redirect_slashes=False (or register both '' and '/' routes) on routers like /api/v1/orders to avoid 307->auth-strip behavior.",
+    "Alert schema requires 'target_value' (not 'target_price') and 'channels' must be one of ['in_app','telegram','email'] - document in API docs / OpenAPI examples."
+  ],
+  "critical_code_review_comments": [
+    "main.py lifespan starts auto_trade_engine globally for ALL users — confirm singleton design is intentional vs per-user (positions/risk_config are global state right now).",
+    "Several routers (auth.py, strategy.py) catch generic exceptions and re-raise as 401/400 (see backend log 'Database error: 401: Incorrect email or password.') — error logger label is misleading.",
+    "yfinance is called synchronously from request handlers (~30s blocking on chart fetches). Should be moved to a background task or cached in DB to keep API latency bounded.",
+    "Strategy /deploy?mode=paper accepts the mode as query param, but body-based modes would be more consistent with /auto-trade/start which uses JSON body.",
+    "Multiple endpoints return raw lists without pagination (e.g. /strategy, /orders/, /alerts) — add limit/offset for production scale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tradeai_backend.py"
+  ],
+  "success_rate": {"backend": "91% (20/22)", "frontend": "not tested (skipped per request)"},
+  "test_credentials": "demo@tradeai.com / Demo1234! (loaded from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tests create TEST_ prefixed strategies and alerts. Alerts are deleted after creation; strategies remain (no DELETE strategy test in scope).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 22 backend test cases live in /app/backend/tests/test_tradeai_backend.py. Run with: cd /app/backend && python -m pytest tests/test_tradeai_backend.py -v --junitxml=/app/test_reports/pytest/tradeai_results.xml. The two persistent failures (strategy/generate 502 and strategy/backtest 400) are NOT backend bugs — first is Cloudflare 502 on long LLM calls (internal call succeeds), second is yfinance historical endpoint returning empty data (try localhost:8001 and a fresh ticker to confirm). If main agent fixes long-running endpoint to be async or adds candle caching, re-run those two tests.",
+  "rca_of_the_issue": {
+    "strategy_generate_502": "Cloudflare ingress in front of the preview URL has a finite request budget. LiteLLM->Claude Sonnet 4.6 call takes 45-90s. Sometimes the ingress returns 502 before backend finishes. Confirmed by direct curl to http://localhost:8001/api/v1/strategy/generate which returns 200 in ~50s with valid strategy JSON. Mitigation: switch to async job pattern or streaming response.",
+    "strategy_backtest_400": "yfinance.download('RELIANCE.NS', period='6mo'|'1mo'|'3mo') returns JSONDecodeError (empty body from Yahoo). Backend correctly maps this to HTTP 400 'No candle data available'. The single-bar quote endpoint (range=1d) works because it hits a different Yahoo URL that is not rate-limited. Mitigation: cache candles in PostgreSQL on first fetch, add retry/backoff, or use a secondary data provider.",
+    "orders_403": "FastAPI default redirect_slashes=True caused '/api/v1/orders' -> '/api/v1/orders/' 307. Through Cloudflare, requests library dropped Authorization on redirect causing 403. Fixed in test by using trailing slash; recommended fix is redirect_slashes=False."
+  }
+}

@@ -6,6 +6,8 @@ import uuid
 import json
 import logging
 import re
+import asyncio
+import os
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -90,37 +92,23 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
 async def _generate_ai(prompt: str, symbols: list, timeframe: str) -> dict:
     full_prompt = f"Create a trading strategy for:\nRequest: {prompt}\nSymbols: {', '.join(symbols)}\nTimeframe: {timeframe}\nMarket: NSE India\n\nRespond with JSON only."
 
-    if settings.ANTHROPIC_API_KEY:
+    # Primary: Emergent Universal LLM key (Claude Sonnet 4.6)
+    emergent_key = settings.EMERGENT_LLM_KEY or os.environ.get("EMERGENT_LLM_KEY")
+    if emergent_key:
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-            msg = client.messages.create(
-                model="claude-sonnet-4-20250514", max_tokens=8192,
-                system=STRATEGY_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": full_prompt}],
-            )
-            raw = msg.content[0].text.strip()
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            chat = LlmChat(
+                api_key=emergent_key,
+                session_id=f"strategy-gen-{uuid.uuid4().hex[:8]}",
+                system_message=STRATEGY_SYSTEM_PROMPT,
+            ).with_model("anthropic", "claude-sonnet-4-6")
+            response = await chat.send_message(UserMessage(text=full_prompt))
+            raw = (response or "").strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
             raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
             return json.loads(raw)
         except Exception as e:
-            logger.error(f"Claude strategy generation: {e}")
-
-    if settings.OPENAI_API_KEY:
-        try:
-            import openai
-            client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-            resp = await client.chat.completions.create(
-                model="gpt-4o", max_tokens=8192,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": STRATEGY_SYSTEM_PROMPT},
-                    {"role": "user", "content": full_prompt},
-                ],
-            )
-            return json.loads(resp.choices[0].message.content)
-        except Exception as e:
-            logger.error(f"OpenAI strategy generation: {e}")
+            logger.error(f"Emergent LLM strategy generation: {e}")
 
     return FALLBACK_STRATEGY
 

@@ -4,11 +4,11 @@ Path: backend/app/services/sentiment_service.py
 """
 import json
 import logging
+import os
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
-import anthropic
-import openai
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,43 +77,30 @@ def _rule_based(symbol: str, headlines: List[str]) -> dict:
     }
 
 
-async def _claude(symbol: str, headlines: List[str]) -> Optional[dict]:
-    if not settings.ANTHROPIC_API_KEY:
+async def _emergent_llm(symbol: str, headlines: List[str]) -> Optional[dict]:
+    """Run sentiment analysis via Emergent Universal LLM key (Claude Sonnet)."""
+    emergent_key = settings.EMERGENT_LLM_KEY or os.environ.get("EMERGENT_LLM_KEY")
+    if not emergent_key:
         return None
     try:
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
         prompt = f"Stock: {symbol}\n\nHeadlines:\n" + "\n".join(f"- {h}" for h in headlines[:10])
-        msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-        return json.loads(raw)
+        chat = LlmChat(
+            api_key=emergent_key,
+            session_id=f"sentiment-{symbol}-{uuid.uuid4().hex[:8]}",
+            system_message=SYSTEM_PROMPT,
+        ).with_model("anthropic", "claude-haiku-4-5-20251001")
+        response = await chat.send_message(UserMessage(text=prompt))
+        raw = (response or "").strip()
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.rsplit("```", 1)[0]
+        return json.loads(raw.strip())
     except Exception as e:
-        logger.error(f"Claude sentiment {symbol}: {e}")
-        return None
-
-
-async def _openai(symbol: str, headlines: List[str]) -> Optional[dict]:
-    if not settings.OPENAI_API_KEY:
-        return None
-    try:
-        client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        prompt = f"Stock: {symbol}\n\nHeadlines:\n" + "\n".join(f"- {h}" for h in headlines[:10])
-        resp = await client.chat.completions.create(
-            model="gpt-4o",
-            max_tokens=512,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        return json.loads(resp.choices[0].message.content)
-    except Exception as e:
-        logger.error(f"OpenAI sentiment {symbol}: {e}")
+        logger.error(f"Emergent LLM sentiment {symbol}: {e}")
         return None
 
 
@@ -147,8 +134,7 @@ class SentimentService:
         headlines = [a["title"] for a in news_data.get("articles", []) if a.get("title")]
 
         analysis = (
-            await _claude(symbol, headlines)
-            or await _openai(symbol, headlines)
+            await _emergent_llm(symbol, headlines)
             or _rule_based(symbol, headlines)
         )
 
