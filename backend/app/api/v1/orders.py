@@ -161,7 +161,8 @@ async def place_order(
     return order
 
 
-@router.get("/", response_model=list[OrderResponse])
+@router.get("", response_model=list[OrderResponse])
+@router.get("/", response_model=list[OrderResponse], include_in_schema=False)
 async def list_orders(
     limit: int = Query(50, le=200),
     offset: int = Query(0),

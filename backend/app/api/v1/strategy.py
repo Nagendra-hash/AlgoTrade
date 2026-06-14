@@ -101,7 +101,7 @@ async def _generate_ai(prompt: str, symbols: list, timeframe: str) -> dict:
                 api_key=emergent_key,
                 session_id=f"strategy-gen-{uuid.uuid4().hex[:8]}",
                 system_message=STRATEGY_SYSTEM_PROMPT,
-            ).with_model("anthropic", "claude-sonnet-4-6")
+            ).with_model("anthropic", "claude-haiku-4-5-20251001")
             response = await chat.send_message(UserMessage(text=full_prompt))
             raw = (response or "").strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)

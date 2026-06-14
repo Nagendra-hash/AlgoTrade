@@ -60,6 +60,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(
@@ -102,11 +103,13 @@ async def ws_market(websocket: WebSocket):
 
 # ── Health Checks ─────────────────────────────────────────────
 @app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 async def health():
     return {
         "status": "healthy",
         "version": settings.APP_VERSION,
         "alert_engine": alert_engine.is_running,
+        "auto_trade_engine": auto_trade_engine.is_running,
     }
 
 
