@@ -134,6 +134,13 @@ async def generate_strategy_stream(
       event: done     data: {}
     """
     async def event_stream():
+        # Defeat ingress/proxy buffering by padding the very first chunk with
+        # ~16 KiB of SSE comment lines (lines starting with ':' are valid SSE
+        # comments per spec and are ignored by EventSource clients).
+        # This exceeds typical proxy_buffer_size thresholds (4-8 KiB) so the
+        # first real event flushes immediately.
+        padding = "\n".join(":" + "x" * 1024 for _ in range(16)) + "\n\n"
+        yield padding
         # Emit initial events instantly so the UI updates within 100ms.
         yield 'event: status\ndata: {"stage":"started","message":"Initializing AI engine..."}\n\n'
         await asyncio.sleep(0)
