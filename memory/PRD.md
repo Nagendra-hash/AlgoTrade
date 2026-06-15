@@ -240,3 +240,38 @@ Full re-test after env recreate (Postgres + Redis re-installed, .env files re-cr
 - P5: Risk hardening UI — circuit breaker / broker-failure recovery / daily-loss kill-switch surfaced
 - P6: Backtesting endpoint + UI page (Sharpe / Drawdown / Profit Factor)
 - P7: Performance polish — WS reconnect, dedupe, timeout wrappers
+
+## Iter12 — Phase 4-7 complete (2026-06-15)
+
+### Added
+**Phase 4 — News-driven trading**
+- `backend/app/services/news_trade_pipeline.py` (NEW) — `NewsTradePipeline` singleton. Every 5 min: pulls `news_impact.analyze_recent` for users with active ai_brain strategies, picks positive-impact items with confidence ≥ 65, builds `NewsCandidate` rows per affected stock.
+- Hooked into `auto_trade_engine._tick()` via `_maybe_run_news_pipeline()` + `_evaluate_news_candidates()`. The latter pops pending candidates per user, fetches closes via Yahoo v8, runs `ai_brain.make_decision`, and on BUY → calls existing `_execute_buy`.
+- API (`backend/app/api/v1/auto_trade.py`): `GET /auto-trade/news-candidates`, `POST /news-candidates/scan` (force), `POST /news-candidates/reset`, `POST /news-candidates/toggle`.
+
+**Phase 5 — Risk hardening UI**
+- `RiskState` dataclass on `EngineState` — circuit_breaker_active, kill_switch_armed, broker_last_error, broker_failure_count, broker_last_recovery_at, last_risk_check_at.
+- Engine helpers: `trip_circuit_breaker`, `reset_circuit_breaker`, `arm_kill_switch`, `disarm_kill_switch`, `record_broker_failure`, `record_broker_recovery`. Kill switch auto-arms when daily loss > cap. Breaker auto-trips after 5 broker failures. `_check_risk_limits` honours both.
+- `get_status()` adds `risk_state` with derived `daily_loss_used_pct`, `trades_used_pct`, `open_pos_used_pct` for gauges.
+- API: `POST /auto-trade/circuit-breaker/{trip,reset}`, `/kill-switch/{arm,disarm}`, `/broker-recovery/reset`.
+- Frontend: new `RiskHardeningPanel` on `/auto-trade` with three sub-cards (circuit-breaker, kill-switch with progress bars, broker recovery) — full data-testid coverage.
+
+**Phase 6 — Backtesting**
+- `backend/app/api/v1/backtest.py` (NEW). `GET /backtest/strategies` (4 types) + `POST /backtest/run` ({symbol, interval, period, strategy_type, initial_capital, parameters}). Returns summary (total_return, win_rate, sharpe, max_drawdown, profit_factor) + trades[] + equity_curve[].
+- `frontend/src/hooks/useBacktest.ts` (NEW). `useBacktestStrategies` + `useRunBacktest`.
+- `frontend/src/app/backtest/page.tsx` (NEW). Workbench with symbol picker, strategy/interval/period/capital selectors, KPI strip (Trades/Win/Sharpe/DD/PF), SVG equity-curve, trade ledger.
+- Sidebar: `nav-backtest` between Strategies and AI Assistant (BarChart3 icon).
+
+**Phase 7 — Perf polish**
+- `frontend/src/hooks/useWebSocket.ts` — exponential-backoff reconnect (1s→2s→4s→8s→16s, cap 30s), reset on successful open, skip reconnect on clean 1000 close with no listeners. Message dedupe within 1.5s window via `_dedupeOk`.
+- `frontend/src/lib/api.ts` — in-flight GET dedupe: identical concurrent GETs share one promise. Added `withTimeout` helper for non-axios async work. Per-call timeout override via `{ timeout }`.
+
+### Test status
+- **Backend pytest**: 12/12 GREEN (`/app/backend/tests/iteration_11_test.py`)
+- **Frontend Playwright (testing agent iter11)**: 100% — login → backtest run → results render → auto-trade risk-hardening flow → news scan
+- All four `Phase 4-7` items from the original problem statement are shipped.
+
+### Open low-priority (deferred)
+- P3: Replace native `window.confirm` for circuit-breaker trip with a custom Radix/shadcn AlertDialog
+- P3: Extract `RiskHardeningPanel` and `NewsCandidatesPanel` from `auto-trade/page.tsx` into their own files
+- P3: Surface a UI tooltip on "Tracked" candidates explaining the counter accumulates across scans
