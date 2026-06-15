@@ -1,0 +1,52 @@
+{
+  "summary": "Iter6 functional sanity after env recreate. Backend: 20/20 pytest tests PASSED end-to-end on external URL (auth/login+signup, /users/me, market indices/quote/candles/search, portfolio invariant source=none + no_live_data=true on summary/positions/funds, orders list, alerts full CRUD pause/resume, notifications, news feed + /impact, sentiment, strategy generate+list, opportunities returns items, ai-models CRUD). Frontend: BLOCKED — during the playwright run the backend started returning HTTP 502 from Cloudflare on every /api/v1/* call; root cause is that Postgres has DIED in the pod (no postgres process running; backend logs show 'OSError: [Errno 111] Connection refused' from asyncpg → 'Application startup failed. Exiting.' loop). Supervisor keeps restarting backend but it cannot reach 127.0.0.1:5432. So the login screen now shows the Cloudflare origin-error banner and cannot reach /dashboard. Backend code itself was proven healthy minutes earlier (20/20 GREEN), so this is a runtime env failure, not a code regression.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "ALL /api/v1/* (post-restart)",
+        "issue": "Postgres process no longer running in the pod. Backend asyncpg connect fails with [Errno 111] Connection refused, uvicorn logs 'Application startup failed. Exiting.', and Cloudflare returns 502 'origin web server returned an invalid or incomplete response'. Repro: `pgrep postgres` returns nothing; `curl -X POST .../api/v1/auth/login` returns 502 5x in a row. Earlier in this same iteration the same suite ran 20/20 GREEN against the same external URL, so the API contract is correct — Postgres just died.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Login -> Dashboard",
+        "issue": "Cannot complete login because /api/v1/auth/login returns 502 (Postgres down). Cloudflare error banner is rendered correctly on the login card, so the error-state UI itself is fine — it's the upstream that's dead.",
+        "affected_selectors": ["input[type=email]", "input[type=password]", "button[type=submit]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_full_smoke.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [
+    "Restart Postgres in the pod (e.g. `pg_ctlcluster 15 main start` or whatever start command was used originally) and re-verify backend uvicorn boots without 'Connection refused'.",
+    "Add Postgres to supervisor (or systemd) so it auto-restarts; otherwise the pod can never survive a Postgres crash. Currently only backend/frontend/mongodb/nginx are under supervisor — postgres is missing from `supervisorctl status`.",
+    "After Postgres is back: re-run /app/backend/tests/test_iter6_full_smoke.py (expect 20/20) and then do the full frontend playwright pass (login → 12 sidebar routes → trading-opportunities pro table → portfolio empty-state)."
+  ],
+  "critical_code_review_comments": [
+    "Backend code itself is solid for this iteration's surface area — all 20 endpoint contracts in the review request were exercised and matched (signup payload requires email+username+password+confirm_password+full_name; alerts use condition enum 'above'/'below'/'percent_change'/...; strategy.generate requires a free-form 'prompt' field; news.impact enforces limit>=5; /opportunities returns {generated_at,total_universe,items[]}).",
+    "Phase-2 'no fake data' invariant holds: /portfolio/summary, /positions, /funds all return source='none' and no_live_data=true with no hardcoded numbers — exactly per PRD.",
+    "Pod has NO process supervisor for Postgres → single point of failure. This caused the frontend run to fail mid-iteration. supervisor should own postgres too.",
+    "Login UI correctly surfaces the upstream error (Cloudflare 502 banner inside the form card) instead of silently spinning — good UX failure-mode."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter6_full_smoke.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20) while Postgres was up; 0% after Postgres died",
+    "frontend": "blocked — only the /login page itself rendered; could not progress past login because backend was 502"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md) — verified valid against backend.",
+  "seed_data_creation": "Created 1 throwaway signup user (smoke_<hex>@test.com) and 1 ai-models config (deleted in-test). No persistent test data left.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Re-run /app/backend/tests/test_iter6_full_smoke.py after main agent restarts Postgres — it should hit 20/20 again. Then do the frontend pass: login at /login (demo creds), assert redirect to /dashboard, walk the 12 sidebar routes, assert /portfolio shows no_live_data text and none of the fake numbers 1,284,500 / 8,240 / 42,180, assert /trading-opportunities table has columns Symbol/LTP/Volume/RSI/MACD/Risk/Confidence. The Cloudflare 502 banner is just the surfaced upstream error — it goes away the moment Postgres is back.",
+  "rca_of_the_issue": "Postgres crashed (or was never re-supervised) between the backend test run and the frontend test run. `pgrep -a postgres` returns nothing, `service postgresql status` says 'unrecognized service', and `ss -tlnp` shows nothing listening on :5432. Backend log: `asyncpg ... [Errno 111] Connection refused ... Application startup failed. Exiting.` → uvicorn exits → supervisor restarts uvicorn → uvicorn exits again. Cloudflare in front of the ingress therefore returns 502 for every /api/v1/* request. Fix: start postgres (start the cluster the main agent created during env setup) and add it to /etc/supervisor/conf.d/*.conf so it auto-restarts. Once postgres is up, no code change is needed — the 20/20 backend pass earlier in this same iteration proves the application code is correct."
+}
