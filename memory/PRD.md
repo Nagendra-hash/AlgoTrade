@@ -1,87 +1,103 @@
-# TradeAI - Product Requirements Document
+# TradeAI — Product Requirements Document
 
-## Original Problem Statement
-"Make this app fully functional and production ready, make changes according to you for better automatic trading experience."
+## Original problem statement
+Audit, clean up, and transform the existing **AlgoTrade** GitHub project
+(https://github.com/Nagendra-hash/AlgoTrade.git) into a focused, real-data-only
+Algorithmic Trading Platform. Eight phases: audit → fake-data removal → focused
+navigation → new Trading Opportunities page → news impact analysis → multi-provider
+AI Model Management → performance → final validation.
 
-The starting codebase was **TradeAI** — an AI-powered algorithmic trading platform for Indian markets (NSE/BSE) built with Next.js + FastAPI + PostgreSQL + Redis.
+## Tech stack (existing — kept as-is)
+- **Frontend**: Next.js 14 (App Router) + TypeScript + Tailwind + React Query + Zustand
+- **Backend**: FastAPI (Python 3.11) + SQLAlchemy 2 async + Alembic
+- **DB**: PostgreSQL 15 + Redis 7
+- **AI**: emergentintegrations (Claude/OpenAI/Gemini via universal key) + direct REST for OpenRouter, Groq, DeepSeek, Mistral, Perplexity + Ollama for local
+- **Market data**: Yahoo Finance v8 REST (working) + Angel One + Zerodha (when broker connected)
+- **News**: Moneycontrol / Economic Times / Foreign Policy RSS + NewsAPI + Finnhub
 
-## Architecture
+## User personas
+- **Retail Indian algo trader** with a Zerodha or Angel One account who wants AI-assisted screening, alerts, and execution.
 
-| Layer | Tech |
-|---|---|
-| Frontend | Next.js 15 (App Router) + TypeScript + Tailwind + Zustand + TanStack Query |
-| Backend | FastAPI + SQLAlchemy 2 (async) + uvicorn |
-| Database | PostgreSQL 15 (under supervisor) |
-| Cache / Pub-Sub | Redis 7 (under supervisor) |
-| AI | Emergent Universal LLM Key (Claude Haiku 4.5 for strategy gen + sentiment) |
-| Market Data | yfinance (live) → 3-tier cache (Redis → PostgreSQL `candle_cache` table → yfinance → deterministic synthetic fallback) |
-| Charting | TradingView lightweight-charts |
-| Brokers | Angel One + Zerodha (Kite Connect) — opt-in, sessions persist in PG |
+## Core requirements (locked)
+1. Real data only (no fake portfolios, holdings, P&L). Show "No live data available" when no broker is connected.
+2. Single fixed navigation: Dashboard / Markets / Watchlist / Trading Opportunities / Orders / Positions / Portfolio / Alerts & News / Strategies / AI Assistant / AI Models / Broker Settings.
+3. Bring-your-own-key AI provider management with automatic fallback chain.
 
-### Process layout (supervisor)
-- `postgresql` — port 5432
-- `redis` — port 6379
-- `backend` — uvicorn `server:app` on port 8001 (server.py is a shim to app.main:app)
-- `frontend` — `yarn start` (Next.js prod) on port 3000
+## Implementation status (2026-06-15)
 
-## Test Credentials
-- **Demo**: `demo@tradeai.com` / `Demo1234!`
-- Public URL: https://pro-quant-trading.preview.emergentagent.com
+### Phase 1 — Audit & cleanup ✅
+Deleted: `frontend/src/app/admin`, `backtest`, `geo-monitor`, `marketplace`, `risk`, `auto-trade`. Removed `geo-monitor*` endpoints from `news.py`. Removed `useBacktest.ts`, `useAutoTrade.ts`. Marketplace hook stubbed. `react-simple-maps` uninstalled. Full audit report at `/app/AUDIT_REPORT.md`.
 
-## Features Delivered
+### Phase 2 — Fake data removal ✅
+`portfolio.py` summary / positions / funds now return `source: "none"` + `no_live_data: true` instead of sample data. Dashboard rebuilt to drop hardcoded fallback numbers (1,284,500 / 8,240 / 42,180 etc.) and instead show `—` placeholders + empty states.
 
-### Session 1 (bootstrap + functional)
-- Booted existing TradeAI on Emergent platform (PG+Redis under supervisor, server.py shim, env vars, seeded demo user)
-- Migrated AI calls (strategy + sentiment) to Emergent Universal LLM key via `emergentintegrations` with Claude Haiku 4.5
-- Backtest synthetic fallback when yfinance fails
-- Routing fixes: redirect_slashes=False, `/api/health` alias, dual routes for `/orders`
-- Pydantic v2 + greenlet + python_http_client + pytz + lxml + bs4 + html5lib + sgmllib3k installed
+### Phase 3 — Streamlined nav ✅
+Sidebar rebuilt with the exact 12-item layout, grouped Trade / Execution / Intelligence / Account. Folder renames: `market→markets`, `strategy→strategies`, `ai-chat→ai-assistant`, `settings→broker-settings`, `alerts→alerts-news`. New folders: `watchlist`, `positions`, `trading-opportunities`, `ai-models`.
 
-### Session 2 (auto-trading enhancements)
-1. **One-click Quick Start** (`POST /api/v1/auto-trade/quick-start`)
-   - Generates AI strategy → saves to DB → starts engine in one tap
-   - 6 preset styles: trend_following / mean_reversion / momentum / breakout / scalping / swing
-   - Frontend modal on `/auto-trade` with `data-testid="quick-start-btn"` and `quick-start-launch-btn`
-   - ~13–20s end-to-end (LLM generation dominates)
-2. **SSE streaming for strategy generation** (`POST /api/v1/strategy/generate-stream`)
-   - Backend yields heartbeat events every 2s while the LLM runs
-   - First event in <100ms locally (curl `--no-buffer` to localhost:8001 verified)
-   - 16 KiB SSE-comment padding to defeat proxy buffering
-   - ⚠️ Public preview ingress buffers responses; full streaming works in real prod with nginx `proxy_buffering off`. In the preview, total time is still ~15s and the Quick Start modal shows a "Generating…" spinner, so UX is acceptable.
-3. **Persistent PG candle cache** (new `candle_cache` table)
-   - 3-tier read: Redis (hot, 1h) → PostgreSQL (persistent, 24h for daily / 1h for intraday) → yfinance → synthetic
-   - Write-through to PG on successful yfinance fetch (synthetic is *not* persisted by design)
-   - Subsequent backtests on same symbol/period serve in ~200 ms
-4. **Broker connect flows verified** — Angel One (TOTP) and Zerodha (OAuth) endpoints exist and return correct envelopes; status `[]` when no broker connected; debug endpoint exposes session diagnostics.
+### Phase 4 — Trading Opportunities ✅
+- Backend: `app/services/opportunity_engine.py` composes screener (RSI, MACD, momentum, trend, mean-reversion) + sentiment + 52-week range. Endpoint: `GET /api/v1/opportunities`.
+- Frontend: `/trading-opportunities` shows the full pro table (Symbol, Company, LTP, Δ%, Volume, News Sentiment, Bull, Bear, Promoter %, FII %, DII %, M-Cap, Sector, RSI, MACD, 52W H/L, Risk, Confidence, Action) + AI summary panel.
+- Promoter/FII/DII/M-Cap are explicitly `null` (UI shows `—`) until a real fundamentals provider is wired.
 
-## Test Status
-- Iteration 1: 20/22 backend endpoints (91%)
-- Iteration 2: 14/16 new-feature tests (87.5%) + 1 skip
-- Remaining non-pass items are environment limits (yfinance egress, ingress buffering), not backend defects.
+### Phase 5 — News impact ✅
+- Backend: `app/services/news_impact.py` + `GET /api/v1/news/impact` per-article direction / confidence / affected stocks + sectors.
+- Frontend: `components/news/NewsImpactPanel.tsx` plus new **Impact** tab on `/alerts-news`.
 
-## Next Action Items
-- Multi-tenant auto-trade engine (currently single global singleton)
-- WebSocket auth + verify `/ws/notifications/{user_id}` through ingress
-- Live broker e2e with real keys (Angel One / Zerodha)
-- Copy-trade social layer (publish/follow auto strategies)
-- Seed `candle_cache` from NSE bhavcopy CSV at startup so backtests don't depend on yfinance egress
+### Phase 6 — AI Model Management ✅
+- DB: `ai_model_configs` table (migration `005_ai_model_configs.py`).
+- Backend: `app/services/ai_router.py` (multi-provider dispatcher w/ fallback) + `app/api/v1/ai_models.py` (CRUD, test, activate, reorder, chat).
+- Frontend: `/ai-models` provider grid (9 providers) + fallback-chain editor + connection-test probe + delete.
 
-## Backlog (P2)
-- Strategy marketplace, mobile responsive audit, multi-portfolio, tax P&L PDF, Stripe billing
+### Phase 7 — Perf hardening ✅
+- Replaced broken `yfinance` calls in `stock_screener.py` with Yahoo Finance v8 REST (the same fast path market.py already used).
+- Pinned `openai==1.99.9` + `httpx==0.28.1` to fix emergentintegrations probe errors.
+- Postgres + Redis installed and persistent in container.
 
-## Files Created / Modified
-- `/app/backend/server.py` (created)
-- `/app/backend/.env` (created)
-- `/app/backend/seed_demo.py` (created)
-- `/app/backend/app/models/candle_cache.py` (created)
-- `/app/backend/app/main.py` (redirect_slashes, /api/health alias)
-- `/app/backend/app/core/config.py` (EMERGENT_LLM_KEY)
-- `/app/backend/app/api/v1/strategy.py` (Emergent LLM + SSE streaming)
-- `/app/backend/app/api/v1/auto_trade.py` (Quick Start endpoint)
-- `/app/backend/app/api/v1/orders.py` (dual `""`/`"/"` route)
-- `/app/backend/app/services/sentiment_service.py` (Emergent LLM, Haiku)
-- `/app/backend/app/services/backtest_service.py` (3-tier cache + synthetic fallback)
-- `/app/frontend/src/hooks/useAutoTrade.ts` (useQuickStart hook)
-- `/app/frontend/src/app/auto-trade/page.tsx` (Quick Start button + modal)
-- `/app/frontend/.env` and `.env.local` (NEXT_PUBLIC_API_URL)
-- `/etc/supervisor/conf.d/postgres_redis.conf` (Postgres + Redis under supervisor)
+### Phase 8 — Final validation ✅
+- Backend: testing_agent_v3 iter3 → **15/15 PASS**.
+- Frontend: testing_agent_v3 iter4 → **13/13 PASS**.
+- Demo login → JWT → all new pages render with the required data-testids.
+
+## Files added / modified / removed
+
+### Removed (frontend)
+`src/app/admin/`, `src/app/backtest/`, `src/app/geo-monitor/`, `src/app/marketplace/`, `src/app/risk/`, `src/app/auto-trade/`, `src/hooks/useBacktest.ts`, `src/hooks/useAutoTrade.ts`.
+
+### Renamed
+`market→markets`, `strategy→strategies`, `ai-chat→ai-assistant`, `settings→broker-settings`, `alerts→alerts-news`.
+
+### New
+- `frontend/src/app/trading-opportunities/page.tsx`
+- `frontend/src/app/ai-models/page.tsx`
+- `frontend/src/app/watchlist/page.tsx`
+- `frontend/src/app/positions/page.tsx`
+- `frontend/src/components/news/NewsImpactPanel.tsx`
+- `backend/app/api/v1/ai_models.py`
+- `backend/app/api/v1/opportunities.py`
+- `backend/app/services/ai_router.py`
+- `backend/app/services/opportunity_engine.py`
+- `backend/app/services/news_impact.py`
+- `backend/app/models/ai_model_config.py`
+- `backend/alembic/versions/005_ai_model_configs.py`
+- `AUDIT_REPORT.md`
+
+### Modified
+- `backend/app/main.py` (registers ai_models + opportunities routers)
+- `backend/app/api/v1/news.py` (added /impact, removed /geo-monitor*)
+- `backend/app/api/v1/portfolio.py` (Phase 2 — no-fake-data invariant)
+- `backend/app/services/stock_screener.py` (Yahoo v8 REST instead of yfinance)
+- `backend/requirements.txt` (openai 1.99.9, httpx 0.28.1)
+- `frontend/src/components/layout/Sidebar.tsx` (new 12-item nav)
+- `frontend/src/components/layout/DashboardLayout.tsx` + `Topbar.tsx` (path renames)
+- `frontend/src/app/dashboard/page.tsx` (real-only stats + empty states)
+- `frontend/src/app/alerts-news/page.tsx` (new Impact tab)
+- `frontend/src/hooks/useStrategies.ts` (marketplace stub)
+- `frontend/package.json` (yarn start uses next dev for hot reload + removed react-simple-maps)
+
+## Prioritized backlog
+- P1: Wire **real fundamentals** (Promoter / FII / DII / Market Cap) into Trading Opportunities — currently `null` → "—". Candidates: NSE bhavcopy / Alpha Vantage / Tijori.
+- P1: Per-article **Claude impact analysis** (currently rule-based via news_impact). Route through `ai_router.chat` for high-confidence rows.
+- P2: Persisted server-side watchlist (currently localStorage-only).
+- P2: Strategies page link to **AI Models** — let user pick which provider generates the strategy.
+- P3: Ollama local model auto-detect (list installed models from `GET /api/tags`).
+- P3: Move AI Models system_prompt to a per-task templates picker.
