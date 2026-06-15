@@ -310,12 +310,16 @@ async def make_decision(
 
     decision.context_hash = ctx_hash
 
-    # Cache successful decisions only
-    if r and decision.provider != "rule_fallback":
+    # Cache decisions to avoid hitting the LLM on every tick.
+    # - Successful LLM decisions: full 5-min TTL (DECISION_CACHE_TTL_SECONDS)
+    # - rule_fallback (LLM unavailable / quota / parse-fail): shorter 60s TTL so we retry quickly
+    #   but don't hammer api.openai.com 429 every 30s × N symbols.
+    if r:
         try:
+            ttl = DECISION_CACHE_TTL_SECONDS if decision.provider != "rule_fallback" else 60
             await r.setex(
                 f"ai_brain:{user_id}:{ctx_hash}",
-                DECISION_CACHE_TTL_SECONDS,
+                ttl,
                 json.dumps(decision.as_dict()),
             )
         except Exception as e:

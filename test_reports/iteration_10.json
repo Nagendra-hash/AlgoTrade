@@ -1,0 +1,40 @@
+{
+  "summary": "Iter11 — Regression after 3 bug fixes from iter9/iter10. ALL 3 BUGS VERIFIED FIXED. (1) HIGH: stop engine → POST /auto-trade/ai-brain/deploy with auto_start=true now returns engine_started=true AND engine.is_running=true AND GET /auto-trade/status confirms is_running=true. Confirmed code at /app/backend/app/api/v1/auto_trade.py:296-304 now uses sync `set_mode(); start()` pattern. (2) MINOR: db.commit() now happens BEFORE _refresh_active_strategies() (line 288) — new strategy is visible in /auto-trade/status active_strategies count immediately (no 30s lag). (3) MINOR: ai_brain rule_fallback decisions are now cached in Redis with 60s TTL (vs 300s for successful LLM). Verified via redis-cli KEYS 'ai_brain:*' returning entries with TTL between 1-60s (lines 317-326 of ai_brain.py). FULL REGRESSION: 33/33 pytest GREEN (14 iter10 ai_brain + 19 iter9 opps_autotrade). NEW: 3/3 iter11 targeted bug-fix verification tests GREEN. Frontend was NOT touched per request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter11_bugfix_verify.py",
+    "/app/backend/tests/test_iter10_ai_brain.py",
+    "/app/backend/tests/test_iter9_opps_autotrade.py",
+    "/app/test_reports/pytest/iter11_results.xml",
+    "/app/test_reports/pytest/iter11_bugfix_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auto_trade.py:288 — explicit `await db.commit()` placed AFTER db.flush()/db.refresh() and BEFORE _refresh_active_strategies(). Correct ordering — the engine cache can now SEE the row via its own AsyncSessionLocal.",
+    "auto_trade.py:296-304 — auto_start branch now uses the same sync pattern as /quick-start: set_mode() then start(). engine_started reliably True. Bug from iter9 fully resolved.",
+    "ai_brain.py:317-326 — comment is good: '5-min TTL for successful, 60s for rule_fallback' — implementation matches. With OpenAI 429 quota exhaustion, this dampens hammering from N-symbols × 2 ticks/min down to N-symbols × 1 tick/min (one tick per cache bucket).",
+    "ai_brain.py:274 — context_hash bucket is `int(time.time() // DECISION_CACHE_TTL_SECONDS)` = 5-min bucket. For rule_fallback with 60s TTL, the cache key still rotates every 5 min so worst case there's a ~4-min gap where rule_fallback is re-fetched, but within the 60s TTL the LLM is NOT called. Acceptable behaviour; future improvement could derive a bucket from the actual TTL.",
+    "No new file size, async, ObjectId, env-var, or status code violations introduced. Both fixed files are clean."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter11_bugfix_verify.py (new — 3 targeted tests for the 3 bug fixes)"
+  ],
+  "success_rate": {
+    "backend": "100% (33/33 regression + 3/3 iter11 bugfix verification = 36/36)",
+    "frontend": "not tested (per request — backend only)"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "test_iter11_bugfix_verify creates 2 ai_brain strategies (RELIANCE/TCS and WIPRO/BAJFINANCE) for the demo user. No teardown — they remain active to keep the engine producing ai_brain decisions for ongoing observation.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 3 (AI Brain) is fully working. All 3 bugs from iter9 are fixed and verified. Engine auto-starts correctly via ai-brain/deploy, db.commit happens before cache refresh (no lag), and rule_fallback decisions cached for 60s (dampens 429s). The demo user now has many active strategies including multiple ai_brain entries — the engine is busy ticking every 30s. Redis keys ai_brain:* are visible and have appropriate TTLs. Frontend was not touched — UI testIDs remain as documented in iter9 (ai-brain-panel, ai-brain-symbols-input, ai-brain-deploy-btn, ai-brain-flash, check-ai).",
+  "rca_of_the_issue": "All 3 iter9 bugs resolved. RCA verification: (1) auto_trade.py:296-304 now reads `auto_trade_engine.set_mode(body.mode); auto_trade_engine.start(); engine_started=True` — matches /quick-start pattern, no more `await` on sync method. (2) auto_trade.py:288 now has explicit `await db.commit()` before _refresh_active_strategies() so the new Strategy row is visible to the engine's separate AsyncSessionLocal. (3) ai_brain.py:317-326 now caches rule_fallback decisions too, with ttl=60 (vs 300 for successful LLM): `ttl = DECISION_CACHE_TTL_SECONDS if decision.provider != 'rule_fallback' else 60`. Verified Redis keys exist with TTL <= 60s within 45s of engine activity."
+}

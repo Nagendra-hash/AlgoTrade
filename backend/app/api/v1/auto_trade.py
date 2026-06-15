@@ -285,6 +285,7 @@ async def deploy_ai_brain(
     db.add(strategy)
     await db.flush()
     await db.refresh(strategy)
+    await db.commit()  # Commit BEFORE engine cache refresh so the new strategy is visible.
 
     # Refresh engine cache
     try:
@@ -292,11 +293,12 @@ async def deploy_ai_brain(
     except Exception as e:
         logger.warning(f"Engine refresh after ai-brain deploy failed: {e}")
 
-    # Optionally start the engine
+    # Optionally start the engine — engine.start() is sync and takes no args.
     engine_started = False
     if body.auto_start and not auto_trade_engine.get_status().get("is_running"):
         try:
-            await auto_trade_engine.start(mode=body.mode)
+            auto_trade_engine.set_mode(body.mode)
+            auto_trade_engine.start()
             engine_started = True
         except Exception as e:
             logger.warning(f"Engine auto-start failed: {e}")
