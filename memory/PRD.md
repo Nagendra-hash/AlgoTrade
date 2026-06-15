@@ -198,3 +198,45 @@ Full re-test after env recreate (Postgres + Redis re-installed, .env files re-cr
 - **WebSocket missing deps lint warnings** — already correctly mitigated by the ref pattern (`onAlertRef`, `onMessageRef`) and the `symbolsKey` join trick; the linter false-positives because it can't see through refs. The disable comment is intentional.
 - **`_place_broker_order` 8-arg signature** — broker-specific keys are intrinsic to the broker API contract; collapsing into a dataclass would just rename the noise. Leaving as-is.
 - **Test file "hardcoded secrets"** are demo passwords (`Demo1234!`) for fixture login — by design.
+
+## Iter11 — Phase 3: AI Brain in Auto-Trade Engine (2026-06-15)
+
+### Added
+**Service** — `/app/backend/app/services/ai_brain.py` (NEW, ~270 lines)
+- `BrainDecision` dataclass: decision/confidence/sl_pct/tp_pct/qty_pct/reasoning/provider/model/cached/context_hash
+- `make_decision(db, user_id, symbol, closes) -> BrainDecision`
+  - Builds context: RSI(14), MACD(12/26/9), SMA(20/50), 1d/5d/20d change %, top 5 news headlines
+  - Calls `ai_router.chat` with the user's primary LLM
+  - Parses JSON response with markdown-fence tolerance
+  - `_validate_decision`: clamps ranges, enforces 1:1.5 RR (tp >= sl×1.5), forces HOLD if confidence < 60
+  - Rule-based fallback when LLM unavailable / fails / quota-exhausted
+  - Redis cache: **5min TTL for successful LLM**, **60s TTL for rule_fallback** (dampens 429 hammering)
+
+**Engine** — `auto_trade_engine.py`
+- `_generate_signal` adds `"ai_brain"` branch — invokes `make_decision`, stashes the result on `strat["_ai_decision"]`, returns 1/-1/0
+- `_execute_buy` reads `strat["_ai_decision"]` and applies AI's `qty_pct`/`sl_pct`/`tp_pct` overrides (with strategy-config fallbacks as hard caps)
+- Activity log stamps `ai_confidence`, `ai_provider`, `reason` on trades
+
+**API** — `auto_trade.py`
+- `POST /api/v1/auto-trade/ai-brain/deploy` with `{symbols, timeframe, mode, auto_start}` — creates ai_brain Strategy + commits + refreshes engine cache + auto-starts engine if requested
+
+**Frontend** — `/auto-trade/page.tsx`
+- AI Brain Mode panel (data-testid=`ai-brain-panel`) with symbols input + Deploy button + success flash
+- AI Brain checkpoint chip shows provider + model (e.g. `openai · gpt-4o-mini`)
+
+### Bugs fixed mid-iteration (iter9 → iter10 → iter11)
+1. **HIGH**: `await auto_trade_engine.start(mode=...)` was broken (start is sync no-args). Replaced with `set_mode(mode); start()` matching `/quick-start` pattern.
+2. **MINOR**: Engine cache lag — added `await db.commit()` before `_refresh_active_strategies()`.
+3. **MINOR**: rule_fallback decisions weren't cached → OpenAI 429-hammering. Now cached for 60s.
+
+### Verified
+- pytest **36/36 GREEN** (14 iter10 + 19 iter9 + 3 iter11 bugfix verification)
+- Engine logs confirm AI Brain calls OpenAI per tick (HTTP 429 quota errors) and falls back cleanly to rule-based HOLD decisions
+- Redis cache active: `ai_brain:*` keys with TTL≤60s
+- AI model `openai/gpt-4o-mini` registered + activated for demo user via `/api/v1/ai-models`
+
+### Still on backlog (Phases 4-7)
+- P4: News-driven entries: every news article → affected stocks → candidate trades fed into engine
+- P5: Risk hardening UI — circuit breaker / broker-failure recovery / daily-loss kill-switch surfaced
+- P6: Backtesting endpoint + UI page (Sharpe / Drawdown / Profit Factor)
+- P7: Performance polish — WS reconnect, dedupe, timeout wrappers
