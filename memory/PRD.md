@@ -101,3 +101,15 @@ Sidebar rebuilt with the exact 12-item layout, grouped Trade / Execution / Intel
 - P2: Strategies page link to **AI Models** — let user pick which provider generates the strategy.
 - P3: Ollama local model auto-detect (list installed models from `GET /api/tags`).
 - P3: Move AI Models system_prompt to a per-task templates picker.
+
+## Functional test — 2026-06-15 (iter7)
+Full re-test after env recreate (Postgres + Redis re-installed, .env files re-created, migrations + demo seed re-run, datastores added to supervisor).
+
+- **Backend**: 20/20 pytest GREEN on `test_iter6_full_smoke.py` (auth, /me, market, portfolio invariant, orders, alerts CRUD, notifications, news, sentiment, strategy, opportunities, ai-models)
+- **Frontend**: login → /dashboard works; all 12 sidebar routes navigate cleanly; empty-states correct (no forbidden fake numbers); Trading Opportunities pro table renders; AI Models 9-provider grid renders
+- **Datastores**: Postgres + Redis now under `/etc/supervisor/conf.d/supervisord_datastores.conf` so they auto-restart (iter6 single-point-of-failure resolved)
+
+### Open low-priority items (non-blocking)
+- P3: `SentimentBadge` renders `<button>` nested inside another `<button>` → React hydration warning
+- P3: `Invalid language tag: en-US@posix` runtime error on some pages (normalise locale before passing to `Intl`)
+- P3: Portfolio header still says "Showing real portfolio data from Angel One ()" when broker is disconnected — show "Broker not connected" instead
