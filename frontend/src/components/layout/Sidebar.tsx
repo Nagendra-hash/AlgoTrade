@@ -4,31 +4,33 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  LayoutDashboard, TrendingUp, Briefcase, ShoppingCart,
-  Sparkles, BarChart2, Bell, MessageSquare, Settings,
-  LogOut, ChevronLeft, ChevronRight, Store, Shield, X, Zap, Globe,
+  LayoutDashboard, TrendingUp, Star, Target, ShoppingCart,
+  Briefcase, Wallet, Bell, Cpu, Bot, Brain, Plug,
+  LogOut, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { group: "Main",      items: [
-    { label: "Dashboard",  href: "/dashboard",   icon: LayoutDashboard },
-    { label: "Market",     href: "/market",      icon: TrendingUp },
-    { label: "Portfolio",  href: "/portfolio",   icon: Briefcase },
-    { label: "Orders",     href: "/orders",      icon: ShoppingCart },
+  { group: "Trade", items: [
+    { label: "Dashboard",             href: "/dashboard",             icon: LayoutDashboard, testid: "nav-dashboard" },
+    { label: "Markets",               href: "/markets",               icon: TrendingUp,      testid: "nav-markets" },
+    { label: "Watchlist",             href: "/watchlist",             icon: Star,            testid: "nav-watchlist" },
+    { label: "Trading Opportunities", href: "/trading-opportunities", icon: Target,          testid: "nav-trading-opportunities", badge: "LIVE" },
   ]},
-  { group: "AI Tools",  items: [
-    { label: "AI Strategy",href: "/strategy",    icon: Sparkles,      badge: "AI" },
-    { label: "Backtest",   href: "/backtest",    icon: BarChart2 },
-    { label: "AI Chat",    href: "/ai-chat",     icon: MessageSquare, badge: "AI" },
-    { label: "Auto Trade", href: "/auto-trade",  icon: Zap },
+  { group: "Execution", items: [
+    { label: "Orders",    href: "/orders",    icon: ShoppingCart, testid: "nav-orders" },
+    { label: "Positions", href: "/positions", icon: Briefcase,    testid: "nav-positions" },
+    { label: "Portfolio", href: "/portfolio", icon: Wallet,       testid: "nav-portfolio" },
   ]},
-  { group: "Tools",     items: [
-    { label: "Alerts & News", href: "/alerts",   icon: Bell },
-    { label: "Geo Monitor",   href: "/geo-monitor", icon: Globe, badge: "NEW" },
-    { label: "Marketplace",   href: "/marketplace", icon: Store },
-    { label: "Risk Manager",  href: "/risk",     icon: Shield },
+  { group: "Intelligence", items: [
+    { label: "Alerts & News",  href: "/alerts-news",   icon: Bell,  testid: "nav-alerts-news" },
+    { label: "Strategies",     href: "/strategies",    icon: Cpu,   testid: "nav-strategies" },
+    { label: "AI Assistant",   href: "/ai-assistant",  icon: Bot,   testid: "nav-ai-assistant", badge: "AI" },
+    { label: "AI Models",      href: "/ai-models",     icon: Brain, testid: "nav-ai-models" },
+  ]},
+  { group: "Account", items: [
+    { label: "Broker Settings", href: "/broker-settings", icon: Plug, testid: "nav-broker-settings" },
   ]},
 ];
 
@@ -46,21 +48,21 @@ export function Sidebar({ isMobileOpen, onMobileClose }: Props) {
       {/* Logo */}
       <div className={cn("flex items-center gap-3 px-4 py-5 border-b border-gray-800", collapsed ? "justify-center" : "justify-between")}>
         <div className="flex items-center gap-2 min-w-0">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
-            <TrendingUp className="h-4 w-4 text-white" />
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center flex-shrink-0">
+            <TrendingUp className="h-4 w-4 text-gray-950" />
           </div>
-          {!collapsed && <span className="font-black text-lg bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent truncate">TradeAI</span>}
+          {!collapsed && <span className="font-black text-lg tracking-tight text-white truncate">TradeAI<span className="text-amber-400">.</span></span>}
         </div>
-        <button onClick={() => setCollapsed(!collapsed)} className="hidden lg:flex text-gray-500 hover:text-white">
+        <button onClick={() => setCollapsed(!collapsed)} data-testid="sidebar-toggle" className="hidden lg:flex text-gray-500 hover:text-white">
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-6">
+      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-5">
         {NAV.map((group) => (
           <div key={group.group}>
-            {!collapsed && <p className="text-xs text-gray-600 font-semibold uppercase tracking-widest px-3 mb-2">{group.group}</p>}
+            {!collapsed && <p className="text-[10px] text-gray-600 font-bold uppercase tracking-[0.18em] px-3 mb-2">{group.group}</p>}
             <ul className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon;
@@ -68,17 +70,18 @@ export function Sidebar({ isMobileOpen, onMobileClose }: Props) {
                 return (
                   <li key={item.href}>
                     <Link href={item.href} onClick={onMobileClose}
+                      data-testid={item.testid}
                       className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group",
-                        active ? "bg-blue-600/20 text-blue-400 border border-blue-500/30" : "text-gray-400 hover:text-white hover:bg-gray-800",
+                        active ? "bg-amber-500/10 text-amber-300 border border-amber-500/20" : "text-gray-400 hover:text-white hover:bg-gray-800/60",
                         collapsed && "justify-center px-2"
                       )} title={collapsed ? item.label : undefined}>
-                      <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-blue-400" : "text-gray-500 group-hover:text-white")} />
+                      <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-amber-300" : "text-gray-500 group-hover:text-white")} />
                       {!collapsed && (
                         <>
                           <span className="flex-1">{item.label}</span>
                           {"badge" in item && item.badge && (
-                            <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] px-1.5 py-0 rounded-full font-bold">{item.badge}</span>
+                            <span className="bg-amber-500/15 text-amber-300 border border-amber-500/25 text-[10px] px-1.5 py-0 rounded-full font-bold">{item.badge}</span>
                           )}
                         </>
                       )}
@@ -93,17 +96,13 @@ export function Sidebar({ isMobileOpen, onMobileClose }: Props) {
 
       {/* Footer */}
       <div className="border-t border-gray-800 p-3 space-y-1">
-        <Link href="/settings" className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-all", collapsed && "justify-center")}>
-          <Settings className="h-4 w-4 flex-shrink-0" />
-          {!collapsed && <span>Settings</span>}
-        </Link>
-        <button onClick={handleLogout} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all", collapsed && "justify-center")}>
+        <button onClick={handleLogout} data-testid="sidebar-logout-btn" className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all", collapsed && "justify-center")}>
           <LogOut className="h-4 w-4 flex-shrink-0" />
           {!collapsed && <span>Logout</span>}
         </button>
         {!collapsed && user && (
-          <div className="flex items-center gap-3 px-3 py-3 mt-2 bg-gray-800/50 rounded-lg">
-            <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+          <div className="flex items-center gap-3 px-3 py-3 mt-2 bg-gray-800/40 rounded-lg" data-testid="sidebar-user-card">
+            <div className="h-8 w-8 rounded-full bg-amber-500 flex items-center justify-center text-gray-950 text-xs font-bold flex-shrink-0">
               {user.username?.[0]?.toUpperCase() ?? "U"}
             </div>
             <div className="min-w-0">
@@ -118,13 +117,13 @@ export function Sidebar({ isMobileOpen, onMobileClose }: Props) {
 
   return (
     <>
-      <aside className={cn("hidden lg:flex flex-col h-screen bg-gray-900 border-r border-gray-800 transition-all duration-300 flex-shrink-0", collapsed ? "w-16" : "w-64")}>
+      <aside className={cn("hidden lg:flex flex-col h-screen bg-gray-950 border-r border-gray-800 transition-all duration-300 flex-shrink-0", collapsed ? "w-16" : "w-64")}>
         {content}
       </aside>
       {isMobileOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onMobileClose} />
-          <aside className="relative w-72 bg-gray-900 border-r border-gray-800 h-full flex flex-col z-10">
+          <aside className="relative w-72 bg-gray-950 border-r border-gray-800 h-full flex flex-col z-10">
             <button onClick={onMobileClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X className="h-5 w-5" /></button>
             {content}
           </aside>

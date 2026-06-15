@@ -147,7 +147,7 @@ export default function PortfolioPage() {
             <div className="flex-1">
               <p className="text-yellow-400 text-sm">
                 Showing sample data.{" "}
-                <a href="/settings" className="underline font-semibold hover:text-yellow-300">
+                <a href="/broker-settings" className="underline font-semibold hover:text-yellow-300">
                   Connect Angel One in Settings
                 </a>{" "}
                 to see your real holdings.
@@ -223,7 +223,7 @@ export default function PortfolioPage() {
                   : "Connect Angel One in Settings to see your portfolio."}
               </p>
               {!isReal && (
-                <a href="/settings"
+                <a href="/broker-settings"
                   className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-sm font-semibold transition-all">
                   <ExternalLink className="h-4 w-4" /> Go to Settings
                 </a>

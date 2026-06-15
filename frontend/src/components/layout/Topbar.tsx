@@ -31,7 +31,7 @@ export function Topbar({ onMobileMenuOpen, title = "Dashboard" }: Props) {
       <div className="flex items-center gap-2">
         {/* Broker connection status */}
         <Link
-          href="/settings"
+          href="/broker-settings"
           className={cn(
             "hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
             connectedBroker

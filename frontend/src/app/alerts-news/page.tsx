@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { NewsFeed } from "@/components/news/NewsFeed";
+import { NewsImpactPanel } from "@/components/news/NewsImpactPanel";
 import { AlertsManager } from "@/components/alerts/AlertsManager";
 import { StockSuggestions } from "@/components/news/StockSuggestions";
 import { useAlerts } from "@/hooks/useAlerts";
@@ -12,16 +13,17 @@ import { useMultipleQuotes } from "@/hooks/useMarket";
 import { cn, getPnLColor, formatCompact } from "@/lib/utils";
 import {
   Bell, Newspaper, Sparkles, X, Check, ArrowUpDown, ArrowUp, ArrowDown,
-  Filter, BarChart3, Globe, Target, Eye, Layers, ArrowRight, Download, TrendingUp, DollarSign,
+  Filter, BarChart3, Globe, Target, Eye, Layers, ArrowRight, Download, TrendingUp, DollarSign, Zap,
 } from "lucide-react";
 import type { Alert, NewsScreenerRecommendation } from "@/types";
 
-type Tab = "news" | "alerts" | "suggestions";
+type Tab = "news" | "impact" | "alerts" | "suggestions";
 type SortField = "name" | "price" | "change" | "alerts";
 type SortDir = "asc" | "desc";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "news",         label: "News",         icon: Newspaper },
+  { id: "impact",       label: "Impact",       icon: Zap },
   { id: "alerts",       label: "Alerts",       icon: Bell },
   { id: "suggestions",  label: "Suggestions",  icon: Sparkles },
 ];
@@ -698,6 +700,11 @@ function AlertsPageContent() {
           {tab === "news" && (
             <div className="h-full">
               <NewsFeed onSymbolClick={toggleSymbol} />
+            </div>
+          )}
+          {tab === "impact" && (
+            <div className="h-full overflow-y-auto pr-2">
+              <NewsImpactPanel />
             </div>
           )}
           {tab === "alerts" && (

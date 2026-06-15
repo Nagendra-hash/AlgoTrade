@@ -117,7 +117,7 @@ export function AlertBell({ userId }: { userId: string }) {
           </div>
 
           <div className="border-t border-gray-800 px-4 py-2.5 flex-shrink-0 text-center">
-            <a href="/alerts" className="text-xs text-blue-400 hover:text-blue-300">View all alerts →</a>
+            <a href="/alerts-news" className="text-xs text-blue-400 hover:text-blue-300">View all alerts →</a>
           </div>
         </div>
       )}

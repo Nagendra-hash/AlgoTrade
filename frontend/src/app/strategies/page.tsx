@@ -344,9 +344,6 @@ export default function StrategyPage() {
               <div className="border-t border-gray-800 p-4 flex items-center justify-between gap-3 flex-wrap">
                 <p className="text-gray-500 text-xs">Saved to your strategy library ✓</p>
                 <div className="flex gap-2">
-                  <a href="/backtest" className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-xl text-xs font-medium transition-all">
-                    📊 Backtest First
-                  </a>
                   <button onClick={() => {
                     const s = strategies[0];
                     if (s) deploy.mutate({ id: s.id, mode: "paper" });

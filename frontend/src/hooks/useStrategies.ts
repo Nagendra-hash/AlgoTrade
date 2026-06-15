@@ -53,11 +53,12 @@ export function useDeleteStrategy() {
   });
 }
 
-export function useMarketplace(search?: string) {
+export function useMarketplace(_search?: string) {
   return useQuery<Strategy[]>({
-    queryKey: ["marketplace", search],
-    queryFn:  () => api.get("/strategy/marketplace", { params: search ? { search } : {} }).then((r) => r.data),
-    staleTime: 60_000,
+    queryKey: ["marketplace", _search],
+    queryFn:  async () => [],
+    enabled: false,
+    staleTime: Infinity,
   });
 }
 

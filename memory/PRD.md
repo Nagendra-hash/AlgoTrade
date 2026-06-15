@@ -26,7 +26,7 @@ The starting codebase was **TradeAI** — an AI-powered algorithmic trading plat
 
 ## Test Credentials
 - **Demo**: `demo@tradeai.com` / `Demo1234!`
-- Public URL: https://fc7e60fe-65a9-4620-9382-a46d2d9394ee.preview.emergentagent.com
+- Public URL: https://pro-quant-trading.preview.emergentagent.com
 
 ## Features Delivered
 

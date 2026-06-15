@@ -6,20 +6,18 @@ import { Topbar } from "./Topbar";
 import { useAuthStore } from "@/store/authStore";
 
 const PAGE_TITLES: Record<string, string> = {
-  "/dashboard":   "Dashboard",
-  "/market":      "Market",
-  "/portfolio":   "Portfolio",
-  "/orders":      "Orders",
-  "/strategy":    "AI Strategy Builder",
-  "/backtest":    "Backtesting",
-  "/ai-chat":     "AI Assistant",
-  "/alerts":      "Alerts & News",
-  "/auto-trade":  "Auto Trading",
-  "/marketplace": "Strategy Marketplace",
-  "/risk":        "Risk Manager",
-  "/geo-monitor": "Geopolitical Monitor",
-  "/settings":    "Settings",
-  "/admin":       "Admin Panel",
+  "/dashboard":             "Dashboard",
+  "/markets":               "Markets",
+  "/watchlist":             "Watchlist",
+  "/trading-opportunities": "Trading Opportunities",
+  "/orders":                "Orders",
+  "/positions":             "Positions",
+  "/portfolio":             "Portfolio",
+  "/alerts-news":           "Alerts & News",
+  "/strategies":            "Strategies",
+  "/ai-assistant":          "AI Assistant",
+  "/ai-models":             "AI Models",
+  "/broker-settings":       "Broker Settings",
 };
 
 interface Props { children: ReactNode; }

@@ -112,72 +112,61 @@ class StockScreener:
         return filtered[:limit]
 
     async def _fetch_and_score(self, symbols: List[str]) -> List[dict]:
-        """Fetch data and compute scores for all symbols."""
-        import yfinance as yf
-
-        results = []
+        """Fetch data and compute scores for all symbols using Yahoo Finance v8 REST API."""
+        import httpx
+        YF_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
+        YF_HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
 
         def _fetch_one(sym: str) -> Optional[dict]:
             yf_sym = NSE_TO_YF.get(sym, sym + ".NS")
             try:
-                t = yf.Ticker(yf_sym)
-                info = t.fast_info
-                hist = t.history(period="3mo", interval="1d")
-
-                if hist.empty or len(hist) < 20:
+                with httpx.Client(timeout=10) as c:
+                    r = c.get(f"{YF_BASE}/{yf_sym}?interval=1d&range=3mo", headers=YF_HEADERS)
+                    r.raise_for_status()
+                    data = r.json()
+                result = data["chart"]["result"][0]
+                meta = result["meta"]
+                q = result["indicators"]["quote"][0]
+                closes = [v for v in (q.get("close") or []) if v is not None]
+                volumes = [v for v in (q.get("volume") or []) if v is not None]
+                if len(closes) < 20:
                     return None
 
-                if hasattr(hist.columns, 'get_level_values') and isinstance(hist.columns, __import__("pandas").MultiIndex):
-                    hist.columns = hist.columns.get_level_values(0)
-                hist.columns = [c.lower() for c in hist.columns]
-
-                ltp = float(getattr(info, "last_price", 0) or 0)
-                prev = float(getattr(info, "previous_close", ltp) or ltp)
-                avg_vol = int(getattr(info, "three_month_average_volume", 0) or 0)
+                ltp = float(meta.get("regularMarketPrice") or closes[-1])
+                prev = float(meta.get("chartPreviousClose") or closes[-2] if len(closes) > 1 else ltp)
+                avg_vol = int(np.mean(volumes[-60:])) if len(volumes) >= 5 else (int(volumes[-1]) if volumes else 0)
                 change_pct = ((ltp - prev) / prev * 100) if prev else 0
 
-                closes = hist["close"].astype(float).tolist()
-                volumes = hist["volume"].astype(float).tolist()
-
-                # RSI
                 rsi = self._compute_rsi(closes, 14)
-
-                # MACD
                 macd_line, signal_line = self._compute_macd(closes)
-
-                # Momentum (ROC 10-day)
                 roc = ((closes[-1] / closes[-10]) - 1) * 100 if len(closes) > 10 else 0
-
-                # Trend (SMA 20 vs 50)
-                sma20 = np.mean(closes[-20:]) if len(closes) >= 20 else ltp
-                sma50 = np.mean(closes[-50:]) if len(closes) >= 50 else sma20
+                sma20 = float(np.mean(closes[-20:])) if len(closes) >= 20 else ltp
+                sma50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else sma20
                 trend_up = sma20 > sma50
 
-                # Volume trend
-                recent_vol = np.mean(volumes[-5:]) if len(volumes) >= 5 else avg_vol
+                recent_vol = float(np.mean(volumes[-5:])) if len(volumes) >= 5 else avg_vol
                 vol_ratio = recent_vol / avg_vol if avg_vol > 0 else 1.0
 
-                # Composite scoring
                 momentum_score = self._score_momentum(roc, rsi, macd_line, signal_line)
                 trend_score = self._score_trend(trend_up, sma20, sma50, ltp)
                 reversion_score = self._score_reversion(rsi, ltp, sma20)
                 composite = (momentum_score + trend_score + reversion_score) / 3
 
                 return {
-                    "symbol": sym,
-                    "ltp": round(ltp, 2),
-                    "change_pct": round(change_pct, 2),
-                    "avg_volume": avg_vol,
-                    "rsi": round(rsi, 2) if rsi else None,
-                    "roc": round(roc, 2),
-                    "macd": round(macd_line, 4) if macd_line else None,
-                    "macd_signal": round(signal_line, 4) if signal_line else None,
-                    "sma20": round(sma20, 2),
-                    "sma50": round(sma50, 2),
-                    "trend_up": trend_up,
-                    "vol_ratio": round(vol_ratio, 2),
-                    "momentum_score": round(momentum_score, 2),
-                    "trend_score": round(trend_score, 2),
+                    "symbol":          sym,
+                    "ltp":             round(ltp, 2),
+                    "change_pct":      round(change_pct, 2),
+                    "avg_volume":      avg_vol,
+                    "rsi":             round(rsi, 2) if rsi else None,
+                    "roc":             round(roc, 2),
+                    "macd":            round(macd_line, 4) if macd_line else None,
+                    "macd_signal":     round(signal_line, 4) if signal_line else None,
+                    "sma20":           round(sma20, 2),
+                    "sma50":           round(sma50, 2),
+                    "trend_up":        trend_up,
+                    "vol_ratio":       round(vol_ratio, 2),
+                    "momentum_score":  round(momentum_score, 2),
+                    "trend_score":     round(trend_score, 2),
                     "reversion_score": round(reversion_score, 2),
                     "composite_score": round(composite, 2),
                 }
@@ -186,17 +175,18 @@ class StockScreener:
                 return None
 
         loop = asyncio.get_event_loop()
-        # Process in batches of 10 to avoid overwhelming yfinance
+        results: List[dict] = []
+        # Run batches of 10 in parallel threads
         for i in range(0, len(symbols), 10):
             batch = symbols[i:i + 10]
-            batch_results = await loop.run_in_executor(
-                None, lambda: [_fetch_one(s) for s in batch]
+            batch_results = await asyncio.gather(
+                *[loop.run_in_executor(None, _fetch_one, s) for s in batch]
             )
             for r in batch_results:
                 if r:
                     results.append(r)
-
         return results
+
 
     def _compute_rsi(self, closes: list, period: int = 14) -> Optional[float]:
         """Compute RSI."""

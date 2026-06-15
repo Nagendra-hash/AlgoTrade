@@ -228,14 +228,14 @@ async def get_holdings_api(
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    # Fallback: sample data
-    enriched = await _enrich_with_ltp(SAMPLE_HOLDINGS)
+    # No broker connected — never return fake data (Phase 2: real data only)
     return {
-        "holdings":  enriched,
-        "source":    "sample",
-        "is_real":   False,
-        "message":   "Connect Angel One or Zerodha in Settings to see your real portfolio.",
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "holdings":     [],
+        "source":       "none",
+        "is_real":      True,
+        "no_live_data": True,
+        "message":      "No live data available. Connect Angel One or Zerodha in Broker Settings to load your portfolio.",
+        "fetched_at":   datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -302,24 +302,21 @@ async def get_portfolio_summary(
                 "updated_at":      datetime.now(timezone.utc).isoformat(),
             }
 
-    # Fallback
-    enriched  = await _enrich_with_ltp(SAMPLE_HOLDINGS)
-    total_inv = sum(h["invested_value"] for h in enriched)
-    total_cur = sum(h["current_value"]  for h in enriched)
-    total_pnl = total_cur - total_inv
-    day_pnl   = sum(h["ltp"] * h["quantity"] * h.get("change_pct", 0) / 100 for h in enriched)
+    # No broker connected — empty summary, never fake values (Phase 2)
     return {
-        "total_invested":  round(total_inv, 2),
-        "current_value":   round(total_cur, 2),
-        "total_pnl":       round(total_pnl, 2),
-        "total_pnl_pct":   round((total_pnl / total_inv * 100) if total_inv else 0, 2),
-        "day_pnl":         round(day_pnl, 2),
-        "holdings_count":  len(enriched),
-        "available_cash":  0,
-        "available_margin":0,
-        "source":          "sample",
-        "is_real":         False,
-        "updated_at":      datetime.now(timezone.utc).isoformat(),
+        "total_invested":   0,
+        "current_value":    0,
+        "total_pnl":        0,
+        "total_pnl_pct":    0,
+        "day_pnl":          0,
+        "holdings_count":   0,
+        "available_cash":   0,
+        "available_margin": 0,
+        "source":           "none",
+        "is_real":          True,
+        "no_live_data":     True,
+        "message":          "No live data available. Connect a broker in Broker Settings.",
+        "updated_at":       datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -348,7 +345,7 @@ async def get_positions_api(
             "is_real":   True,
         }
 
-    return {"positions": [], "source": "sample", "is_real": False}
+    return {"positions": [], "source": "none", "is_real": True, "no_live_data": True}
 
 
 @router.get("/funds")
@@ -373,6 +370,7 @@ async def get_funds_api(
         "available_margin": 0,
         "used_margin":      0,
         "net":              0,
-        "source":           "sample",
-        "is_real":          False,
+        "source":           "none",
+        "is_real":          True,
+        "no_live_data":     True,
     }

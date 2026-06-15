@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 3 backend audit/transform testing. 15/15 tests passed (100%) for the new TradeAI focused-trading platform. Verified: demo login; AI Models full CRUD lifecycle (providers list returns all 9 - openai/anthropic/gemini/openrouter/groq/deepseek/mistral/perplexity/ollama; initial empty list; upsert anthropic claude-sonnet-4-6 with empty api_key -> api_key_preview=null; activate -> is_active=true; /test endpoint returns {ok:bool,...} 200; DELETE -> 204 + removed); Opportunities GET returns 10 items each with non-null ltp/rsi/composite_score/recommended_action/ai_summary; News Impact analyses recent articles with affected_stocks, impact_direction in {positive,negative,neutral}, confidence 0..100, no_live_data=false; Portfolio summary/positions/funds correctly return no_live_data=true with source='none' (NOT 'sample') and zero numbers; Market indices returns real Yahoo data for NIFTY50/BANKNIFTY/SENSEX; /market/quote/RELIANCE returns ltp=1314.3 + change_pct + volume; news listing returns 65 cached articles; news/screener returns recommendations array; removed /news/geo-monitor and /news/geo-monitor/history both return 404.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_audit.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AI Models /providers cleanly exposes all 9 supported providers with default_model + category (cloud/local) -- nice schema for the AI Models page.",
+    "POST /ai-models with empty api_key correctly returns api_key_preview=null, signaling that the universal EMERGENT_LLM_KEY will be used (BYOK fallback chain working as designed).",
+    "Portfolio endpoints (summary/positions/funds) now return no_live_data=true + source='none' with all numerics zeroed when no broker is connected -- the 'no sample/fake data' invariant from phase 2 holds. Previously the source could be 'sample'; now it is uniformly 'none'.",
+    "Opportunities endpoint warms in <11s end-to-end and returns all 10 rows with full enrichment (ltp/rsi/composite_score/recommended_action/ai_summary). The Yahoo Finance v8 REST switch in stock_screener._fetch_and_score works from this container (unlike yfinance which was blocked in iter2 -- a real improvement).",
+    "News Impact analysis returns articles_analyzed>=1, top_stocks/top_sectors aggregates, and per-article affected_stocks + impact_direction + confidence -- the schema matches the spec for the news-impact UI.",
+    "Removed endpoints /news/geo-monitor and /news/geo-monitor/history correctly return 404 (router de-registered, not just stub-disabled). Frontend route folders /admin /backtest /geo-monitor /marketplace /risk /auto-trade are also gone from /app/frontend/src/app (verified by listing).",
+    "Demo login -> JWT access_token + refresh_token, 1440min TTL. Seed is idempotent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_audit.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15)",
+    "frontend": "not tested (skipped per request)"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test lifecycle creates 1 anthropic AI model config and deletes it at end of run -- no residual data. Pre-existing leftover configs (if any) are cleaned in test_initial_list_empty.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iter3 backend tests live in /app/backend/tests/test_iter3_audit.py. Run with: cd /app/backend && python -m pytest tests/test_iter3_audit.py -v --junitxml=/app/test_reports/pytest/iter3_results.xml. Total runtime ~10s. The AI Models /test endpoint internally calls emergentintegrations with EMERGENT_LLM_KEY -- it took <1s in this run (likely cached/short prompt) and returned ok=true. Yahoo Finance v8 REST egress is now working from this container for both /market/* and the opportunities engine (notable change vs iter2 where yfinance was blocked). Frontend was NOT tested per request scope.",
+  "rca_of_the_issue": "N/A -- all tests passed."
+}

@@ -12,7 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.api.v1 import auth, users, brokers, market, orders, portfolio, alerts, notifications, news, sentiment, strategy, admin
-from app.api.v1 import auto_trade
+from app.api.v1 import auto_trade, ai_models, opportunities
 from app.websockets.notification_ws import notification_ws_endpoint
 from app.services.alert_engine import alert_engine
 from app.services.portfolio_broadcaster import portfolio_broadcaster
@@ -86,6 +86,8 @@ app.include_router(strategy.router,      prefix="/api/v1/strategy",      tags=["
 app.include_router(brokers.router, prefix="/api/v1/brokers", tags=["Brokers"])
 app.include_router(admin.router,         prefix="/api/v1/admin",         tags=["Admin"])
 app.include_router(auto_trade.router,     prefix="/api/v1/auto-trade",     tags=["Auto Trade"])
+app.include_router(ai_models.router,      prefix="/api/v1/ai-models",     tags=["AI Models"])
+app.include_router(opportunities.router,  prefix="/api/v1/opportunities", tags=["Opportunities"])
 
 # ── WebSocket Routes ──────────────────────────────────────────
 @app.websocket("/ws/notifications/{user_id}")
