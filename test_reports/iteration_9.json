@@ -1,0 +1,60 @@
+{
+  "summary": "Iter10 — Phase 3 (AI Brain in Auto-Trade Engine) tested e2e. BACKEND: 14/14 pytest GREEN on /app/backend/tests/test_iter10_ai_brain.py (deploy ai-brain returns 201 + ai_brain strategy persisted + validation on empty/bad-timeframe/bad-mode + regression on quick-start, stop, start, risk, positions, activity + ai_brain unit tests for rule-fallback and 1:1.5 RR + confidence<60 force-HOLD). Iter9 regression also fully GREEN (19/19). Engine logs confirm: ai_brain branch executes per (symbol,tick), tries OpenAI (key quota-exhausted → 429), gracefully falls back to rule-based: 'ai-brain LLM failed for INFY: ... insufficient_quota' followed by '🧠 AI-brain INFY: HOLD (conf=50 ... via rule_fallback)'. No fake trades executed for HOLD. _execute_buy honours AI-supplied sl_pct/tp_pct/qty_pct overrides and stamps ai_confidence + ai_provider on activity entries. existing strategy_types (trend_following, momentum, mean_reversion, hybrid_trend_momentum) still work. FRONTEND /auto-trade: AI Brain panel (data-testid='ai-brain-panel') renders between RiskSettings and stat strip with PHASE 3 badge, prefilled symbols input (data-testid='ai-brain-symbols-input' default 'RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK'), Deploy AI Brain button (data-testid='ai-brain-deploy-btn'). Clicking deploy → calls POST /auto-trade/ai-brain/deploy and shows ai-brain-flash '🧠 AI Brain deployed on 2 symbols. First decision within 30s.'. AI Brain checkpoint chip correctly shows 'openai · gpt-4o-mini' from the user's active ai_model_config. Today's Activity table shows real ai_brain rule-fallback decisions (HDFCBANK BUY @ ₹777.35, reasoning 'Healthy uptrend (RSI 49.3, MACD+, +5.24% 5d)'). One real bug found (see backend_issues.critical).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/v1/auto-trade/ai-brain/deploy",
+        "issue": "auto_start path is broken — line 299 calls `await auto_trade_engine.start(mode=body.mode)` but engine.start() at /app/backend/app/services/auto_trade_engine.py:111 is a SYNC method with NO arguments. The call raises TypeError ('start() got an unexpected keyword argument mode' / 'object NoneType can't be used in await'), which is silently swallowed by the try/except → engine_started always False, and is_running stays False when the engine was stopped beforehand. Reproduced: stop engine, then POST /ai-brain/deploy with auto_start=true returns 201 but engine_started=false and /auto-trade/status still shows is_running=false. Fix: replace lines 297-302 with `auto_trade_engine.set_mode(body.mode); auto_trade_engine.start(); engine_started = True`.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/v1/auto-trade/ai-brain/deploy",
+        "issue": "Engine cache `active_strategies` count does not increment for ~30s after deploy. The endpoint calls `await auto_trade_engine._refresh_active_strategies()` BEFORE the request's DB transaction commits (refresh uses its own AsyncSessionLocal, can't see flushed-but-uncommitted row). Cache only catches up on the next engine tick (~30s). Fix: explicitly `await db.commit()` after `db.flush()` before calling `_refresh_active_strategies()`, OR move refresh into a background task triggered post-commit."
+      },
+      {
+        "endpoint": "ai_brain decision cache",
+        "issue": "Cache check `if r and decision.provider != 'rule_fallback'` means rule_fallback decisions are NEVER cached. With OpenAI quota-exhausted (every call → 429 → rule_fallback), the LLM is hit on EVERY tick (30s) for every symbol — confirmed in backend logs. Spec says 'second tick within 5 min for same symbol+price+TTL-window does not hit the LLM again' — this is only true when LLM succeeds. Either cache rule_fallback with a shorter TTL, or cache the 'LLM failed' state for 1-2 min to dampen repeated 429s."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter10_ai_brain.py",
+    "/app/backend/tests/test_iter9_opps_autotrade.py",
+    "/app/test_reports/pytest/iter10_results.xml"
+  ],
+  "action_items": [
+    "FIX (HIGH): /app/backend/app/api/v1/auto_trade.py line 297-302 — replace `await auto_trade_engine.start(mode=body.mode)` with sync `auto_trade_engine.set_mode(body.mode); auto_trade_engine.start()`. Currently the auto_start contract of POST /auto-trade/ai-brain/deploy is broken when engine was stopped.",
+    "FIX (minor): /app/backend/app/api/v1/auto_trade.py line 287 — add `await db.commit()` before calling `auto_trade_engine._refresh_active_strategies()` so the engine cache picks up the new strategy immediately instead of 30s later.",
+    "Consider caching rule_fallback decisions (or LLM-failure state) in Redis to avoid hitting OpenAI 429 on every 30s tick × every symbol."
+  ],
+  "critical_code_review_comments": [
+    "ai_brain.py is well structured: _validate_decision correctly clamps ranges, enforces 1:1.5 RR (`if tp_pct < sl_pct * 1.5: tp_pct = sl_pct * 1.5`), and forces HOLD when confidence < 60 — verified via unit test.",
+    "ai_brain.py: _parse_llm_response is robust to markdown fences and partial JSON — good defensive coding.",
+    "auto_trade_engine.py line 480-509: ai_brain branch correctly stashes decision on strat dict for _execute_buy to read, and logs the decision string in the spec'd format '🧠 AI-brain {SYMBOL}: ...'.",
+    "_execute_buy correctly reads ai_qty_pct/ai_sl_pct/ai_tp_pct from strat['_ai_decision'] with fallbacks to strategy defaults (lines 553-562). ai_confidence + ai_provider are stamped on the activity entry (lines 641-642).",
+    "DEPLOY endpoint uses StrategyStatus.ACTIVE.value, is_paper_active/is_live_active correctly toggled by mode — clean.",
+    "BUG: AIBrainDeploy.timeframe regex `^(1d|1h|15m|5m)$` is correct, but the spec also implies 1m support — fine as-is for Indian equity.",
+    "BUG: deploy endpoint at line 299 — `await auto_trade_engine.start(mode=body.mode)` will always raise (start is sync, no mode arg) and is swallowed. Same line in /quick-start (line 221) correctly does `set_mode()` then `start()` — copy that pattern.",
+    "ai_router.chat caught-exception fallback to rule_based is good, but the rule_fallback path is hit on every tick because cache only stores successful decisions — see minor issue."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter10_ai_brain.py (new — 14 tests covering Phase 3 ai-brain deploy + regression + unit tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 iter10 + 19/19 iter9 regression)",
+    "frontend": "100% — AI Brain panel + symbols input + Deploy button + flash text + AI Brain checkpoint chip (openai · gpt-4o-mini) all verified"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! — validated from /app/memory/test_credentials.md",
+  "seed_data_creation": "Each test run creates new ai_brain Strategy rows for the demo user (RELIANCE/INFY, HDFCBANK/SBIN, WIPRO). No teardown — kept active so the engine has work to do. After this iter the demo user has ~16 active strategies including multiple ai_brain entries.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 3 (AI Brain) is functionally working — the LLM chain reaches OpenAI, 429 fallback is clean, decisions execute correctly via _execute_buy with AI-supplied sl/tp/qty overrides. Two backend bugs remain: (1) HIGH: /auto-trade/ai-brain/deploy auto_start path is broken (async start() call on sync method), engine doesn't actually auto-start when stopped — but engine was already running from prior tests so didn't surface in UI; (2) MINOR: engine.active_strategies lag of ~30s after deploy. Frontend test IDs are: ai-brain-panel, ai-brain-symbols-input, ai-brain-deploy-btn, ai-brain-flash, check-ai (showing 'openai · gpt-4o-mini'). After main agent fixes the start(mode=...) bug, please re-test the auto_start=true flow.",
+  "rca_of_the_issue": "Bug RCA: auto_trade.py:299 `await auto_trade_engine.start(mode=body.mode)` — `start()` is defined as `def start(self) -> None` (no args, sync). The `mode=` kwarg is a TypeError. Even if you remove the kwarg, the `await` on a sync method returning None raises 'object NoneType can't be used in await expression'. Both errors are caught by the surrounding `try/except Exception` block (line 301), which logs a warning and sets engine_started=False. The /quick-start endpoint (line 220-221) uses the correct pattern: `set_mode(body.mode); start()` (no await, no mode kwarg). Author likely copy-pasted from a draft where they intended `start` to become async. Mitigation: replace lines 297-302 with the sync pattern from /quick-start."
+}

@@ -368,7 +368,8 @@ class AutoTradeEngine:
             if last_time and (datetime.now(timezone.utc) - last_time).seconds < 300:
                 continue
 
-            # Generate signal
+            # Generate signal — pass strat_id so ai_brain knows whose user to fetch AI config for
+            strat["id"] = strat_id
             signal = await self._generate_signal(
                 symbol, strategy_type, timeframe, params, strat
             )
@@ -476,6 +477,37 @@ class AutoTradeEngine:
                 elif closes[-1] > sma20 + bb_std * std20:
                     return -1  # Sell at upper band
 
+            elif strategy_type == "ai_brain":
+                # LLM-driven decision — AI evaluates technicals + sentiment + news.
+                # The AI's suggested SL/TP/qty_pct are stashed on the strategy dict
+                # so _execute_buy can honour them. Falls back to rule-based if no AI.
+                from app.services.ai_brain import make_decision
+                from app.core.database import AsyncSessionLocal
+
+                user_id = self._get_user_id_for_strategy(strat["id"]) if "id" in strat else strat.get("user_id")
+                if not user_id:
+                    return 0
+
+                async with AsyncSessionLocal() as session:
+                    decision = await make_decision(
+                        db=session, user_id=str(user_id),
+                        symbol=symbol, closes=closes,
+                    )
+
+                # Stash the decision back on the strat dict for _execute_buy to read
+                strat["_ai_decision"] = decision.as_dict()
+                logger.info(
+                    f"🧠 AI-brain {symbol}: {decision.decision} "
+                    f"(conf={decision.confidence}, sl={decision.sl_pct}%, tp={decision.tp_pct}%, "
+                    f"qty={decision.qty_pct}%, via {decision.provider})"
+                )
+
+                if decision.decision == "BUY":
+                    return 1
+                if decision.decision == "SELL":
+                    return -1
+                return 0
+
             # Default: use saved python_code if available
             python_code = strat.get("python_code")
             if python_code:
@@ -512,10 +544,22 @@ class AutoTradeEngine:
     async def _execute_buy(
         self, strat_id: str, strat: dict, symbol: str, price: float
     ) -> None:
-        """Execute a buy order for a strategy signal."""
-        position_size_pct = strat.get("max_position_size", 10.0) / 100.0
-        stop_loss_pct = strat.get("stop_loss_pct", 2.0) / 100.0
-        take_profit_pct = strat.get("take_profit_pct", 4.0) / 100.0
+        """Execute a buy order for a strategy signal.
+
+        If the strategy generated an AI-brain decision (strat["_ai_decision"]),
+        the AI's suggested SL/TP/position-size override the static config values.
+        """
+        # AI-brain decision overrides (if present)
+        ai = strat.get("_ai_decision") or {}
+        ai_qty_pct  = ai.get("qty_pct")
+        ai_sl_pct   = ai.get("sl_pct")
+        ai_tp_pct   = ai.get("tp_pct")
+        ai_reason   = ai.get("reasoning")
+        ai_conf     = ai.get("confidence")
+
+        position_size_pct = (ai_qty_pct if ai_qty_pct is not None else strat.get("max_position_size", 10.0)) / 100.0
+        stop_loss_pct     = (ai_sl_pct  if ai_sl_pct  is not None else strat.get("stop_loss_pct", 2.0))  / 100.0
+        take_profit_pct   = (ai_tp_pct  if ai_tp_pct  is not None else strat.get("take_profit_pct", 4.0)) / 100.0
 
         # Calculate position size
         capital = self._state.risk_config.get("trading_capital", 100000)
@@ -593,6 +637,9 @@ class AutoTradeEngine:
             "status": "COMPLETE",
             "mode": self._state.mode,
             "strategy": strat.get("name", ""),
+            "reason": ai_reason if ai_reason else None,
+            "ai_confidence": ai_conf if ai_conf else None,
+            "ai_provider": ai.get("provider") if ai else None,
         })
 
         # Notify user

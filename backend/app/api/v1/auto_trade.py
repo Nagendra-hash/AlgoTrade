@@ -231,3 +231,86 @@ async def quick_start(
         },
         "engine": auto_trade_engine.get_status(),
     }
+
+
+# ── AI Brain mode — Phase 3 ───────────────────────────────────────
+
+class AIBrainDeploy(BaseModel):
+    """Deploy a single 'ai_brain' strategy that lets the AI decide everything."""
+    symbols: List[str] = Field(..., min_length=1, max_length=20)
+    exchange: str = Field("NSE", max_length=10)
+    timeframe: str = Field("1d", pattern="^(1d|1h|15m|5m)$")
+    mode: str = Field("paper", pattern="^(paper|live)$")
+    auto_start: bool = True
+
+
+@router.post("/ai-brain/deploy", status_code=201)
+async def deploy_ai_brain(
+    body: AIBrainDeploy,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a deployed ai_brain strategy + (optionally) start the engine.
+
+    The AI brain picks BUY/SELL/HOLD per symbol per tick, with its own
+    SL/TP/qty% — the rule-based parameters are only used as a hard cap.
+    """
+    symbols = [s.upper().strip() for s in body.symbols]
+
+    strategy = Strategy(
+        user_id=current_user.id,
+        name=f"AI Brain · {', '.join(symbols[:3])}{'…' if len(symbols) > 3 else ''}",
+        description=f"LLM-driven decisions for {len(symbols)} symbols on {body.timeframe} timeframe.",
+        strategy_type="ai_brain",
+        user_prompt="AI brain quick-deploy from /auto-trade dashboard.",
+        entry_logic="LLM evaluates technicals + sentiment + recent news → JSON decision",
+        exit_logic="AI-supplied SL/TP/trailing stop. Hard caps: 5% SL / 15% TP / 25% qty.",
+        risk_rules="AI must produce confidence >= 60 to trade. Default rule-based fallback if AI unavailable.",
+        indicators=["RSI(14)", "MACD", "SMA(20/50)", "Volume", "News sentiment"],
+        parameters={"min_confidence": 60, "decision_cache_min": 5},
+        symbols=symbols,
+        timeframe=body.timeframe,
+        exchange=body.exchange,
+        tags=["ai-brain", "auto-pilot"],
+        status=StrategyStatus.ACTIVE.value,
+        is_paper_active=(body.mode == "paper"),
+        is_live_active=(body.mode == "live"),
+        stop_loss_pct=3.0,          # hard cap; AI's value is used if smaller
+        take_profit_pct=8.0,        # hard cap
+        trailing_stop_enabled=True,
+        trailing_stop_pct=1.5,
+        max_position_size=15.0,
+        max_drawdown_pct=10.0,
+    )
+    db.add(strategy)
+    await db.flush()
+    await db.refresh(strategy)
+
+    # Refresh engine cache
+    try:
+        await auto_trade_engine._refresh_active_strategies()  # type: ignore[attr-defined]
+    except Exception as e:
+        logger.warning(f"Engine refresh after ai-brain deploy failed: {e}")
+
+    # Optionally start the engine
+    engine_started = False
+    if body.auto_start and not auto_trade_engine.get_status().get("is_running"):
+        try:
+            await auto_trade_engine.start(mode=body.mode)
+            engine_started = True
+        except Exception as e:
+            logger.warning(f"Engine auto-start failed: {e}")
+
+    return {
+        "strategy": {
+            "id":            str(strategy.id),
+            "name":          strategy.name,
+            "strategy_type": strategy.strategy_type,
+            "symbols":       strategy.symbols,
+            "timeframe":     strategy.timeframe,
+            "mode":          body.mode,
+        },
+        "engine_started":  engine_started,
+        "engine":          auto_trade_engine.get_status(),
+        "message":         "AI Brain is now monitoring your symbols. First decision will appear within 30 seconds.",
+    }

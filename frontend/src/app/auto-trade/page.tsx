@@ -83,6 +83,21 @@ export default function AutoTradePage() {
     onSuccess: () => { refetch(); qc.invalidateQueries({ queryKey: ["auto-trade-status"] }); },
   });
 
+  const [aiBrainSymbols, setAiBrainSymbols] = useState("RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK");
+  const [aiBrainFlash, setAiBrainFlash] = useState<string | null>(null);
+  const aiBrainMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/ai-brain/deploy", {
+      symbols: aiBrainSymbols.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean),
+      timeframe: "1d", mode: "paper", auto_start: true,
+    }).then((r) => r.data),
+    onSuccess: (d: any) => {
+      setAiBrainFlash(`🧠 AI Brain deployed on ${d.strategy.symbols.length} symbols. First decision within 30s.`);
+      setTimeout(() => setAiBrainFlash(null), 6000);
+      qc.invalidateQueries({ queryKey: ["auto-trade-status"] });
+    },
+    onError: () => setAiBrainFlash("Deploy failed — try again."),
+  });
+
   const connectedBrokers = (brokerResp ?? []).filter((b: any) => b.is_connected);
   const activeModels = (modelsResp ?? []).filter((m: any) => m.is_active);
   const positions = positionsResp?.positions ?? [];
@@ -192,6 +207,43 @@ export default function AutoTradePage() {
 
         {/* Risk settings panel */}
         {showSettings && status && <RiskSettings status={status} onClose={() => setShowSettings(false)} />}
+
+        {/* AI Brain quick-deploy */}
+        <div className="bg-gradient-to-br from-violet-500/10 via-violet-500/5 to-transparent border border-violet-500/30 rounded-2xl p-5" data-testid="ai-brain-panel">
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="h-12 w-12 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
+              <Bot className="h-6 w-6 text-violet-300" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                AI Brain Mode <span className="text-[10px] px-2 py-0.5 bg-violet-500/20 text-violet-300 rounded-full font-bold tracking-wider">PHASE 3</span>
+              </h2>
+              <p className="text-gray-400 text-xs mt-1">
+                Let the LLM evaluate technicals + sentiment + news for each symbol and decide entry / SL / TP / qty automatically.
+                Hard caps: 5% SL · 15% TP · 25% qty. Falls back to rule-based if AI quota is exhausted.
+              </p>
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <input
+                  data-testid="ai-brain-symbols-input"
+                  value={aiBrainSymbols}
+                  onChange={(e) => setAiBrainSymbols(e.target.value)}
+                  placeholder="RELIANCE, INFY, TCS"
+                  className="flex-1 min-w-[260px] px-3 py-2 bg-gray-950 border border-gray-800 focus:border-violet-500/50 rounded-lg text-sm text-white tabular-nums outline-none"
+                />
+                <button
+                  data-testid="ai-brain-deploy-btn"
+                  disabled={aiBrainMut.isPending || !aiBrainSymbols.trim()}
+                  onClick={() => aiBrainMut.mutate()}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-violet-500 hover:bg-violet-400 disabled:bg-gray-800 disabled:text-gray-600 text-white rounded-lg text-sm font-bold transition-all">
+                  <Bot className="h-4 w-4" /> {aiBrainMut.isPending ? "Deploying…" : "Deploy AI Brain"}
+                </button>
+              </div>
+              {aiBrainFlash && (
+                <p data-testid="ai-brain-flash" className="text-xs text-violet-300 mt-2">{aiBrainFlash}</p>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Stat strip */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
