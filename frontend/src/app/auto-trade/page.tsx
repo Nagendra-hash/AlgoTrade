@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import {
   Zap, Play, Square, Activity, TrendingUp, Briefcase, AlertTriangle,
   Bot, Settings2, RefreshCw, IndianRupee, Target, Plug, ShieldAlert,
+  Shield, Newspaper, Power, RotateCcw, Check, Wifi, WifiOff,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -28,6 +29,20 @@ interface EngineStatus {
     max_trades_per_day?: number;
     trailing_stop_enabled?: boolean;
     trailing_stop_pct?: number;
+  };
+  risk_state?: {
+    circuit_breaker_active: boolean;
+    circuit_breaker_reason?: string | null;
+    circuit_breaker_tripped_at?: string | null;
+    kill_switch_armed: boolean;
+    kill_switch_reason?: string | null;
+    broker_last_error?: string | null;
+    broker_failure_count: number;
+    broker_last_recovery_at?: string | null;
+    last_risk_check_at?: string | null;
+    daily_loss_used_pct: number;
+    trades_used_pct: number;
+    open_pos_used_pct: number;
   };
 }
 
@@ -209,8 +224,7 @@ export default function AutoTradePage() {
         {showSettings && status && <RiskSettings status={status} onClose={() => setShowSettings(false)} />}
 
         {/* AI Brain quick-deploy */}
-        <div className="bg-gradient-to-br from-violet-500/10 via-violet-500/5 to-transparent border border-violet-500/30 rounded-2xl p-5" data-testid="ai-brain-panel">
-          <div className="flex items-start gap-4 flex-wrap">
+        <div className="bg-gradient-to-br from-violet-500/10 via-violet-500/5 to-transparent border border-violet-500/30 rounded-2xl p-5" data-testid="ai-brain-panel">          <div className="flex items-start gap-4 flex-wrap">
             <div className="h-12 w-12 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
               <Bot className="h-6 w-6 text-violet-300" />
             </div>
@@ -244,6 +258,12 @@ export default function AutoTradePage() {
             </div>
           </div>
         </div>
+
+        {/* Risk Hardening panel */}
+        {status && <RiskHardeningPanel status={status} />}
+
+        {/* News-Driven Candidates */}
+        <NewsCandidatesPanel />
 
         {/* Stat strip */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
@@ -433,3 +453,369 @@ function RiskSettings({ status, onClose }: { status: EngineStatus; onClose: () =
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// Risk Hardening Panel — circuit breaker, kill switch, broker
+// ─────────────────────────────────────────────────────────────
+function RiskHardeningPanel({ status }: { status: EngineStatus }) {
+  const qc = useQueryClient();
+  const rs = status.risk_state;
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["auto-trade-status"] });
+
+  const cbResetMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/circuit-breaker/reset").then((r) => r.data),
+    onSuccess: () => { invalidate(); setFlash("Circuit breaker reset · entries re-enabled"); setTimeout(() => setFlash(null), 4000); },
+  });
+  const cbTripMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/circuit-breaker/trip", { reason: "Manual trip from dashboard" }).then((r) => r.data),
+    onSuccess: () => { invalidate(); setFlash("Circuit breaker TRIPPED — new entries blocked"); setTimeout(() => setFlash(null), 4000); },
+  });
+  const ksDisarmMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/kill-switch/disarm").then((r) => r.data),
+    onSuccess: () => { invalidate(); setFlash("Kill switch disarmed"); setTimeout(() => setFlash(null), 4000); },
+  });
+  const ksArmMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/kill-switch/arm", { reason: "Manual arm from dashboard" }).then((r) => r.data),
+    onSuccess: () => { invalidate(); setFlash("Kill switch ARMED — entries blocked"); setTimeout(() => setFlash(null), 4000); },
+  });
+  const brokerRecoverMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/broker-recovery/reset").then((r) => r.data),
+    onSuccess: () => { invalidate(); setFlash("Broker marked healthy"); setTimeout(() => setFlash(null), 4000); },
+  });
+
+  if (!rs) return null;
+
+  const dailyLossUsed   = rs.daily_loss_used_pct ?? 0;
+  const tradesUsed      = rs.trades_used_pct ?? 0;
+  const openPosUsed     = rs.open_pos_used_pct ?? 0;
+  const cbActive        = rs.circuit_breaker_active;
+  const ksArmed         = rs.kill_switch_armed;
+  const brokerFailing   = rs.broker_failure_count > 0;
+
+  return (
+    <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-5" data-testid="risk-hardening-panel">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-bold text-white flex items-center gap-2">
+          <Shield className="h-4 w-4 text-amber-400" /> Risk Hardening
+          <span className="text-[10px] px-2 py-0.5 bg-amber-500/15 text-amber-300 rounded-full font-bold tracking-wider">SAFETY</span>
+        </h2>
+        <span className="text-[11px] text-gray-500 font-mono">
+          {rs.last_risk_check_at ? `checked ${new Date(rs.last_risk_check_at).toLocaleTimeString()}` : ""}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Circuit Breaker */}
+        <div className={cn(
+          "rounded-xl border p-4 flex flex-col gap-3",
+          cbActive ? "bg-red-500/10 border-red-500/40" : "bg-gray-950 border-gray-800"
+        )} data-testid="risk-circuit-breaker">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2">
+              <Power className={cn("h-3.5 w-3.5", cbActive ? "text-red-400" : "text-gray-500")} /> Circuit Breaker
+            </p>
+            <span className={cn(
+              "text-[10px] px-2 py-0.5 rounded-full font-bold tracking-wider",
+              cbActive ? "bg-red-500/20 text-red-300" : "bg-emerald-500/15 text-emerald-300"
+            )}>{cbActive ? "TRIPPED" : "ARMED"}</span>
+          </div>
+          <p className="text-sm text-white">
+            {cbActive
+              ? <>Blocking new entries · <span className="text-red-300">{rs.circuit_breaker_reason ?? "manual trip"}</span></>
+              : "Normal — engine entries enabled."}
+          </p>
+          {cbActive && rs.circuit_breaker_tripped_at && (
+            <p className="text-[11px] text-gray-500 font-mono">since {new Date(rs.circuit_breaker_tripped_at).toLocaleString()}</p>
+          )}
+          <div className="flex items-center gap-2 mt-1">
+            {cbActive ? (
+              <button data-testid="cb-reset-btn" disabled={cbResetMut.isPending} onClick={() => cbResetMut.mutate()}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-800 text-gray-950 rounded-lg text-xs font-bold tracking-wider uppercase">
+                <Check className="h-3.5 w-3.5" /> Reset
+              </button>
+            ) : (
+              <button data-testid="cb-trip-btn" disabled={cbTripMut.isPending} onClick={() => { if (confirm("Manually trip the circuit breaker? This blocks all new entries.")) cbTripMut.mutate(); }}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-red-500/30 text-gray-300 hover:text-red-300 rounded-lg text-xs font-bold tracking-wider uppercase border border-gray-800 hover:border-red-500/40">
+                <Power className="h-3.5 w-3.5" /> Trip Manually
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Daily-Loss Kill Switch */}
+        <div className={cn(
+          "rounded-xl border p-4 flex flex-col gap-3",
+          ksArmed ? "bg-amber-500/10 border-amber-500/40" : "bg-gray-950 border-gray-800"
+        )} data-testid="risk-kill-switch">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2">
+              <ShieldAlert className={cn("h-3.5 w-3.5", ksArmed ? "text-amber-400" : "text-gray-500")} /> Daily-Loss Kill Switch
+            </p>
+            <span className={cn(
+              "text-[10px] px-2 py-0.5 rounded-full font-bold tracking-wider",
+              ksArmed ? "bg-amber-500/20 text-amber-300" : "bg-gray-800 text-gray-400"
+            )}>{ksArmed ? "ARMED" : "SAFE"}</span>
+          </div>
+
+          <ProgressBar testid="kill-bar" label={`Daily loss · ${dailyLossUsed.toFixed(0)}% of cap`} value={dailyLossUsed}
+            tone={dailyLossUsed > 80 ? "bad" : dailyLossUsed > 50 ? "warn" : "good"} />
+          <ProgressBar testid="trade-bar" label={`Trades · ${tradesUsed.toFixed(0)}% of daily cap`} value={tradesUsed}
+            tone={tradesUsed > 80 ? "bad" : tradesUsed > 50 ? "warn" : "good"} />
+          <ProgressBar testid="open-bar" label={`Open positions · ${openPosUsed.toFixed(0)}% of cap`} value={openPosUsed}
+            tone={openPosUsed > 80 ? "bad" : openPosUsed > 50 ? "warn" : "good"} />
+
+          {ksArmed && rs.kill_switch_reason && (
+            <p className="text-xs text-amber-300">{rs.kill_switch_reason}</p>
+          )}
+          <div className="flex items-center gap-2 mt-1">
+            {ksArmed ? (
+              <button data-testid="ks-disarm-btn" disabled={ksDisarmMut.isPending} onClick={() => ksDisarmMut.mutate()}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-gray-950 rounded-lg text-xs font-bold tracking-wider uppercase">
+                <Check className="h-3.5 w-3.5" /> Disarm
+              </button>
+            ) : (
+              <button data-testid="ks-arm-btn" disabled={ksArmMut.isPending} onClick={() => { if (confirm("Arm the kill switch? This blocks all new entries until disarmed.")) ksArmMut.mutate(); }}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-amber-500/30 text-gray-300 hover:text-amber-300 rounded-lg text-xs font-bold tracking-wider uppercase border border-gray-800 hover:border-amber-500/40">
+                <ShieldAlert className="h-3.5 w-3.5" /> Arm
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Broker Recovery */}
+        <div className={cn(
+          "rounded-xl border p-4 flex flex-col gap-3",
+          brokerFailing ? "bg-orange-500/10 border-orange-500/40" : "bg-gray-950 border-gray-800"
+        )} data-testid="risk-broker">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2">
+              {brokerFailing ? <WifiOff className="h-3.5 w-3.5 text-orange-400" /> : <Wifi className="h-3.5 w-3.5 text-emerald-400" />}
+              Broker Recovery
+            </p>
+            <span className={cn(
+              "text-[10px] px-2 py-0.5 rounded-full font-bold tracking-wider",
+              brokerFailing ? "bg-orange-500/20 text-orange-300" : "bg-emerald-500/15 text-emerald-300"
+            )}>{brokerFailing ? `${rs.broker_failure_count} FAILS` : "HEALTHY"}</span>
+          </div>
+          {brokerFailing ? (
+            <>
+              <p className="text-sm text-white">{rs.broker_last_error}</p>
+              <p className="text-[11px] text-gray-500">
+                After 5 consecutive failures the breaker auto-trips. Tap "Mark Healthy" once you've reconnected.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-white">
+              No recent failures.
+              {rs.broker_last_recovery_at && (
+                <span className="text-[11px] text-gray-500 ml-2 font-mono">
+                  last recovery {new Date(rs.broker_last_recovery_at).toLocaleTimeString()}
+                </span>
+              )}
+            </p>
+          )}
+          <div>
+            <button data-testid="broker-recover-btn" disabled={brokerRecoverMut.isPending} onClick={() => brokerRecoverMut.mutate()}
+              className={cn(
+                "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold tracking-wider uppercase",
+                brokerFailing
+                  ? "bg-emerald-500 hover:bg-emerald-400 text-gray-950"
+                  : "bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-800"
+              )}>
+              <RotateCcw className="h-3.5 w-3.5" /> Mark Healthy
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {flash && (
+        <p data-testid="risk-flash" className="text-xs text-amber-300 mt-3">{flash}</p>
+      )}
+    </div>
+  );
+}
+
+function ProgressBar({ testid, label, value, tone = "good" }: {
+  testid: string; label: string; value: number;
+  tone?: "good" | "warn" | "bad";
+}) {
+  const barColor =
+    tone === "good" ? "bg-emerald-400"
+    : tone === "warn" ? "bg-amber-400"
+    : "bg-red-400";
+  return (
+    <div data-testid={testid}>
+      <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold mb-1">{label}</p>
+      <div className="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden">
+        <div className={cn("h-1.5 rounded-full transition-all", barColor)} style={{ width: `${Math.min(value, 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// News-Driven Candidates Panel
+// ─────────────────────────────────────────────────────────────
+interface NewsCandidate {
+  symbol: string;
+  headline: string;
+  source: string;
+  article_id: string;
+  impact_direction: string;
+  confidence: number;
+  affected_sectors: string[];
+  opportunity_summary: string;
+  status: string;
+  created_at: number;
+  user_id?: string;
+  ai_decision?: { decision?: string; confidence?: number; reasoning?: string; provider?: string } | null;
+  rejection_reason?: string | null;
+}
+
+interface NewsCandidatesResp {
+  summary: {
+    enabled: boolean;
+    last_run_iso?: string | null;
+    next_run_in_sec: number;
+    candidates_total: number;
+    pending: number;
+    executed: number;
+    rejected: number;
+    last_error?: string | null;
+  };
+  candidates: NewsCandidate[];
+}
+
+function NewsCandidatesPanel() {
+  const qc = useQueryClient();
+  const { data } = useQuery<NewsCandidatesResp>({
+    queryKey: ["news-candidates"],
+    queryFn: () => api.get("/auto-trade/news-candidates").then((r) => r.data),
+    refetchInterval: 15_000,
+  });
+  const scanMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/news-candidates/scan", undefined, { timeout: 45_000 }).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["news-candidates"] }); },
+  });
+  const toggleMut = useMutation({
+    mutationFn: (enabled: boolean) => api.post("/auto-trade/news-candidates/toggle", { enabled }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["news-candidates"] }),
+  });
+  const resetMut = useMutation({
+    mutationFn: () => api.post("/auto-trade/news-candidates/reset").then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["news-candidates"] }),
+  });
+
+  const summary = data?.summary;
+  const candidates = data?.candidates ?? [];
+
+  return (
+    <div className="bg-gradient-to-br from-sky-500/10 via-sky-500/5 to-transparent border border-sky-500/30 rounded-2xl p-5"
+      data-testid="news-candidates-panel">
+      <div className="flex items-start gap-4 flex-wrap">
+        <div className="h-12 w-12 rounded-xl bg-sky-500/20 flex items-center justify-center shrink-0">
+          <Newspaper className="h-6 w-6 text-sky-300" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              News-Driven Candidates
+              <span className="text-[10px] px-2 py-0.5 bg-sky-500/20 text-sky-300 rounded-full font-bold tracking-wider">PHASE 4</span>
+            </h2>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer">
+                <input
+                  data-testid="news-pipeline-toggle"
+                  type="checkbox"
+                  checked={summary?.enabled ?? true}
+                  onChange={(e) => toggleMut.mutate(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded bg-gray-950 border-gray-700"
+                />
+                Pipeline enabled
+              </label>
+              <button data-testid="news-scan-btn" disabled={scanMut.isPending} onClick={() => scanMut.mutate()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-500 hover:bg-sky-400 disabled:bg-gray-800 text-white rounded-lg text-xs font-bold">
+                <RefreshCw className={cn("h-3.5 w-3.5", scanMut.isPending && "animate-spin")} />
+                {scanMut.isPending ? "Scanning…" : "Scan Now"}
+              </button>
+              <button data-testid="news-reset-btn" disabled={resetMut.isPending} onClick={() => resetMut.mutate()}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-400 rounded-lg text-xs">
+                Reset
+              </button>
+            </div>
+          </div>
+          <p className="text-gray-400 text-xs mt-1.5">
+            Every 5 minutes we scan news with positive impact, extract affected stocks, and push them into the AI Brain
+            for evaluation. A BUY decision triggers a paper or live order via the engine.
+          </p>
+
+          {/* Summary strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+            <MiniStat testid="news-stat-total"     label="Tracked"  value={String(summary?.candidates_total ?? 0)} />
+            <MiniStat testid="news-stat-pending"   label="Pending"  value={String(summary?.pending ?? 0)} />
+            <MiniStat testid="news-stat-executed"  label="Executed" value={String(summary?.executed ?? 0)} tone="good" />
+            <MiniStat testid="news-stat-rejected"  label="Rejected" value={String(summary?.rejected ?? 0)} tone="warn" />
+          </div>
+
+          <p className="text-[11px] text-gray-500 mt-2 font-mono">
+            Last scan: {summary?.last_run_iso ? new Date(summary.last_run_iso).toLocaleTimeString() : "never"}
+            {" · "}next in ~{Math.max(0, Math.round((summary?.next_run_in_sec ?? 0) / 60))}m
+            {summary?.last_error && <span className="text-red-400 ml-2">· error: {summary.last_error}</span>}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 bg-gray-950/60 border border-gray-800 rounded-xl overflow-hidden">
+        <table className="w-full text-sm" data-testid="news-candidates-table">
+          <thead className="bg-gray-950 text-[11px] uppercase tracking-wider text-gray-500">
+            <tr><th className="text-left px-3 py-2.5">Symbol</th><th>Conf.</th><th className="text-left">Headline</th><th>Status</th><th className="text-left">AI Decision</th></tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/60">
+            {candidates.length === 0 && (
+              <tr><td colSpan={5} className="text-center text-gray-500 py-8" data-testid="news-empty">
+                No candidates yet. Tap <strong className="text-white">Scan Now</strong> to seed the pipeline with the latest news.
+              </td></tr>
+            )}
+            {candidates.map((c) => (
+              <tr key={`${c.user_id ?? ""}-${c.symbol}-${c.article_id}`} className="hover:bg-gray-800/30" data-testid={`news-cand-${c.symbol}`}>
+                <td className="px-3 py-2 font-bold text-white">{c.symbol}<span className="text-gray-600 text-[10px] ml-2">{c.source}</span></td>
+                <td className="text-center text-sky-300 tabular-nums font-semibold">{c.confidence}%</td>
+                <td className="text-gray-300 text-xs max-w-md truncate pr-3">{c.headline}</td>
+                <td className="text-center">
+                  <span className={cn(
+                    "text-[10px] px-2 py-0.5 rounded-full font-bold tracking-wider",
+                    c.status === "executed" ? "bg-emerald-500/20 text-emerald-300"
+                    : c.status === "rejected" ? "bg-gray-800 text-gray-400"
+                    : "bg-sky-500/20 text-sky-300"
+                  )}>{c.status.toUpperCase()}</span>
+                </td>
+                <td className="text-gray-400 text-xs max-w-xs truncate">
+                  {c.ai_decision
+                    ? <><span className="font-bold text-white">{c.ai_decision.decision}</span> · {c.ai_decision.confidence}% · {c.ai_decision.reasoning?.slice(0, 60)}</>
+                    : c.rejection_reason
+                    ? <span className="text-gray-500">{c.rejection_reason}</span>
+                    : <span className="text-gray-600">pending…</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ testid, label, value, tone = "neutral" }: {
+  testid: string; label: string; value: string; tone?: "good" | "warn" | "bad" | "neutral";
+}) {
+  const colour = tone === "good" ? "text-emerald-300" : tone === "warn" ? "text-amber-300" : tone === "bad" ? "text-red-300" : "text-white";
+  return (
+    <div data-testid={testid} className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2">
+      <p className="text-gray-500 text-[10px] font-bold uppercase tracking-wider">{label}</p>
+      <p className={cn("text-lg font-black mt-0.5 tabular-nums", colour)}>{value}</p>
+    </div>
+  );
+}
+

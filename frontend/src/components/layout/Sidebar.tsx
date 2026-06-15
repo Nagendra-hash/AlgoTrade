@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard, TrendingUp, Star, Target, ShoppingCart,
-  Briefcase, Wallet, Bell, Cpu, Bot, Brain, Plug, Zap,
+  Briefcase, Wallet, Bell, Cpu, Bot, Brain, Plug, Zap, BarChart3,
   LogOut, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
@@ -27,6 +27,7 @@ const NAV = [
   { group: "Intelligence", items: [
     { label: "Alerts & News",  href: "/alerts-news",   icon: Bell,  testid: "nav-alerts-news" },
     { label: "Strategies",     href: "/strategies",    icon: Cpu,   testid: "nav-strategies" },
+    { label: "Backtest",       href: "/backtest",      icon: BarChart3, testid: "nav-backtest" },
     { label: "AI Assistant",   href: "/ai-assistant",  icon: Bot,   testid: "nav-ai-assistant", badge: "AI" },
     { label: "AI Models",      href: "/ai-models",     icon: Brain, testid: "nav-ai-models" },
   ]},

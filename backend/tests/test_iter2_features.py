@@ -13,7 +13,7 @@ import pytest
 import requests
 import psycopg2
 
-BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://func-test.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://algo-hardened.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api/v1"
 
 PG_DSN = "postgresql://trader:trader123@localhost:5432/tradeai"

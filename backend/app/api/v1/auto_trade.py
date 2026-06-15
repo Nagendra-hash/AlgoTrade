@@ -316,3 +316,102 @@ async def deploy_ai_brain(
         "engine":          auto_trade_engine.get_status(),
         "message":         "AI Brain is now monitoring your symbols. First decision will appear within 30 seconds.",
     }
+
+
+# ── Risk hardening: circuit breaker + kill switch + broker recovery ───
+
+class CircuitBreakerRequest(BaseModel):
+    reason: str = Field("Manual trip from dashboard", max_length=240)
+
+
+class KillSwitchRequest(BaseModel):
+    reason: str = Field("Manual arm from dashboard", max_length=240)
+
+
+@router.post("/circuit-breaker/trip")
+async def circuit_breaker_trip(
+    body: CircuitBreakerRequest = CircuitBreakerRequest(),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually trip the circuit breaker — blocks all new entries until reset."""
+    auto_trade_engine.trip_circuit_breaker(body.reason)
+    return {"message": "Circuit breaker tripped", "status": auto_trade_engine.get_status()}
+
+
+@router.post("/circuit-breaker/reset")
+async def circuit_breaker_reset(current_user: User = Depends(get_current_user)):
+    """Reset the circuit breaker so trading can resume."""
+    auto_trade_engine.reset_circuit_breaker()
+    return {"message": "Circuit breaker reset", "status": auto_trade_engine.get_status()}
+
+
+@router.post("/kill-switch/arm")
+async def kill_switch_arm(
+    body: KillSwitchRequest = KillSwitchRequest(),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually arm the daily-loss kill switch — blocks all new entries until disarmed."""
+    auto_trade_engine.arm_kill_switch(body.reason)
+    return {"message": "Kill switch armed", "status": auto_trade_engine.get_status()}
+
+
+@router.post("/kill-switch/disarm")
+async def kill_switch_disarm(current_user: User = Depends(get_current_user)):
+    """Disarm the daily-loss kill switch."""
+    auto_trade_engine.disarm_kill_switch()
+    return {"message": "Kill switch disarmed", "status": auto_trade_engine.get_status()}
+
+
+@router.post("/broker-recovery/reset")
+async def broker_recovery_reset(current_user: User = Depends(get_current_user)):
+    """Mark the broker connection as healthy and clear failure count."""
+    auto_trade_engine.record_broker_recovery()
+    return {"message": "Broker recovery recorded", "status": auto_trade_engine.get_status()}
+
+
+# ── News-driven candidates ────────────────────────────────────────
+
+@router.get("/news-candidates")
+async def list_news_candidates(
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(50, le=200),
+):
+    """List recent news-driven trade candidates pushed into the AI Brain queue."""
+    from app.services.news_trade_pipeline import news_trade_pipeline
+    return {
+        "summary":    news_trade_pipeline.get_summary(),
+        "candidates": news_trade_pipeline.get_candidates(user_id=str(current_user.id), limit=limit),
+    }
+
+
+@router.post("/news-candidates/scan")
+async def trigger_news_scan(current_user: User = Depends(get_current_user)):
+    """Force a news-driven candidate scan right now (bypasses the 5-min cooldown)."""
+    from app.services.news_trade_pipeline import news_trade_pipeline
+    news_trade_pipeline._last_run_ts = 0  # force run
+    result = await news_trade_pipeline.scan_and_push()
+    return {"message": "Scan complete", "result": result, "summary": news_trade_pipeline.get_summary()}
+
+
+@router.post("/news-candidates/reset")
+async def reset_news_candidates(current_user: User = Depends(get_current_user)):
+    """Clear all news candidates (and the processed-article cache)."""
+    from app.services.news_trade_pipeline import news_trade_pipeline
+    news_trade_pipeline.reset()
+    return {"message": "Candidates cleared", "summary": news_trade_pipeline.get_summary()}
+
+
+class NewsPipelineToggle(BaseModel):
+    enabled: bool
+
+
+@router.post("/news-candidates/toggle")
+async def toggle_news_pipeline(
+    body: NewsPipelineToggle,
+    current_user: User = Depends(get_current_user),
+):
+    """Enable / disable the news-driven trade pipeline."""
+    from app.services.news_trade_pipeline import news_trade_pipeline
+    news_trade_pipeline.set_enabled(body.enabled)
+    return {"message": f"Pipeline {'enabled' if body.enabled else 'disabled'}",
+            "summary": news_trade_pipeline.get_summary()}

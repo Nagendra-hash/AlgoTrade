@@ -27,6 +27,8 @@ from app.services.telegram_service import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TIMEFRAME_FALLBACK = "1d"
+
 # ── NSE symbol → Yahoo Finance mapping ────────────────────────
 NSE_TO_YF = {
     "RELIANCE": "RELIANCE.NS", "TCS": "TCS.NS", "INFY": "INFY.NS",
@@ -64,6 +66,20 @@ class Position:
 
 
 @dataclass
+class RiskState:
+    """Risk-hardening surface — circuit breaker, kill switch, broker recovery."""
+    circuit_breaker_active: bool = False
+    circuit_breaker_reason: Optional[str] = None
+    circuit_breaker_tripped_at: Optional[str] = None
+    kill_switch_armed: bool = False           # auto-arms when daily loss > cap
+    kill_switch_reason: Optional[str] = None
+    broker_last_error: Optional[str] = None
+    broker_failure_count: int = 0
+    broker_last_recovery_at: Optional[str] = None
+    last_risk_check_at: Optional[str] = None
+
+
+@dataclass
 class EngineState:
     """Persistent state for the auto-trading engine."""
     is_running: bool = False
@@ -84,6 +100,8 @@ class EngineState:
         "trailing_stop_enabled": True,
         "trailing_stop_pct": 1.5,
     })
+    risk_state: RiskState = field(default_factory=RiskState)
+    tick_count: int = 0
 
 
 class AutoTradeEngine:
@@ -134,6 +152,7 @@ class AutoTradeEngine:
 
     def get_status(self) -> dict:
         """Return engine status for API / frontend."""
+        rs = self._state.risk_state
         return {
             "is_running": self._running,
             "mode": self._state.mode,
@@ -146,7 +165,90 @@ class AutoTradeEngine:
                 if self._state.total_trades_today > 0 else 0, 2
             ),
             "risk_config": self._state.risk_config,
+            "risk_state": {
+                "circuit_breaker_active":     rs.circuit_breaker_active,
+                "circuit_breaker_reason":     rs.circuit_breaker_reason,
+                "circuit_breaker_tripped_at": rs.circuit_breaker_tripped_at,
+                "kill_switch_armed":          rs.kill_switch_armed,
+                "kill_switch_reason":         rs.kill_switch_reason,
+                "broker_last_error":          rs.broker_last_error,
+                "broker_failure_count":       rs.broker_failure_count,
+                "broker_last_recovery_at":    rs.broker_last_recovery_at,
+                "last_risk_check_at":         rs.last_risk_check_at,
+                # Derived ratios for the UI gauges
+                "daily_loss_used_pct":        self._daily_loss_used_pct(),
+                "trades_used_pct":            self._trades_used_pct(),
+                "open_pos_used_pct":          self._open_pos_used_pct(),
+            },
         }
+
+    def _daily_loss_used_pct(self) -> float:
+        rc = self._state.risk_config
+        capital = max(rc.get("trading_capital", 100000) or 100000, 1)
+        cap_loss = capital * (rc.get("max_daily_loss_pct", 5.0) / 100)
+        if cap_loss <= 0:
+            return 0.0
+        used = max(0, -self._state.today_pnl)  # only counts losses
+        return round(min(used / cap_loss * 100, 100), 1)
+
+    def _trades_used_pct(self) -> float:
+        cap = max(self._state.risk_config.get("max_trades_per_day", 20) or 1, 1)
+        return round(min(self._state.total_trades_today / cap * 100, 100), 1)
+
+    def _open_pos_used_pct(self) -> float:
+        cap = max(self._state.risk_config.get("max_open_positions", 5) or 1, 1)
+        open_count = len([p for p in self._state.positions.values() if p.status == "OPEN"])
+        return round(min(open_count / cap * 100, 100), 1)
+
+    # ── Manual circuit-breaker / kill-switch controls ────────────────
+
+    def trip_circuit_breaker(self, reason: str) -> dict:
+        rs = self._state.risk_state
+        rs.circuit_breaker_active = True
+        rs.circuit_breaker_reason = reason[:240]
+        rs.circuit_breaker_tripped_at = datetime.now(timezone.utc).isoformat()
+        logger.warning(f"🔴 Circuit breaker TRIPPED: {reason}")
+        return self.get_status()
+
+    def reset_circuit_breaker(self) -> dict:
+        rs = self._state.risk_state
+        was_active = rs.circuit_breaker_active
+        rs.circuit_breaker_active = False
+        rs.circuit_breaker_reason = None
+        rs.circuit_breaker_tripped_at = None
+        if was_active:
+            logger.info("🟢 Circuit breaker reset")
+        return self.get_status()
+
+    def arm_kill_switch(self, reason: str) -> dict:
+        rs = self._state.risk_state
+        rs.kill_switch_armed = True
+        rs.kill_switch_reason = reason[:240]
+        logger.warning(f"💀 Daily-loss kill switch ARMED: {reason}")
+        return self.get_status()
+
+    def disarm_kill_switch(self) -> dict:
+        rs = self._state.risk_state
+        rs.kill_switch_armed = False
+        rs.kill_switch_reason = None
+        logger.info("✅ Daily-loss kill switch disarmed")
+        return self.get_status()
+
+    def record_broker_failure(self, message: str) -> None:
+        rs = self._state.risk_state
+        rs.broker_failure_count += 1
+        rs.broker_last_error = message[:240]
+        # Auto-trip the breaker after 5 consecutive broker failures
+        if rs.broker_failure_count >= 5 and not rs.circuit_breaker_active:
+            self.trip_circuit_breaker(f"5 consecutive broker failures: {message[:120]}")
+
+    def record_broker_recovery(self) -> None:
+        rs = self._state.risk_state
+        if rs.broker_failure_count > 0 or rs.broker_last_error:
+            rs.broker_failure_count = 0
+            rs.broker_last_error = None
+            rs.broker_last_recovery_at = datetime.now(timezone.utc).isoformat()
+            logger.info("🟢 Broker connection recovered")
 
     def get_positions(self) -> List[dict]:
         """Return all open positions."""
@@ -201,12 +303,17 @@ class AutoTradeEngine:
 
     async def _tick(self) -> None:
         """Single engine tick: refresh strategies → generate signals → execute → manage positions."""
+        self._state.tick_count += 1
+
         # 1. Refresh active strategies from DB
         await self._refresh_active_strategies()
 
         # 2. Check risk limits before trading
         if not self._check_risk_limits():
             logger.warning("⛔ Risk limits reached — skipping signal generation")
+            # Still manage open positions so SL/TP can fire even when breaker is up
+            await self._manage_positions()
+            await self._broadcast_update()
             return
 
         # 3. Fetch market data for all strategy symbols
@@ -223,11 +330,107 @@ class AutoTradeEngine:
         for strat_id, strat in self._state.active_strategies.items():
             await self._process_strategy(strat_id, strat)
 
+        # 4b. News-driven candidate scan (every ~10 ticks ≈ 5 min)
+        await self._maybe_run_news_pipeline()
+        await self._evaluate_news_candidates()
+
         # 5. Monitor open positions (stop-loss, take-profit, trailing stop)
         await self._manage_positions()
 
         # 6. Broadcast portfolio update
         await self._broadcast_update()
+
+    async def _maybe_run_news_pipeline(self) -> None:
+        """Trigger a news scan if the cooldown has elapsed."""
+        try:
+            from app.services.news_trade_pipeline import news_trade_pipeline
+            if news_trade_pipeline.should_run_now():
+                await news_trade_pipeline.scan_and_push()
+        except Exception as e:
+            logger.warning(f"news pipeline scan failed: {e}")
+
+    async def _evaluate_news_candidates(self) -> None:
+        """For each ai_brain strategy, pull pending news candidates and ask the AI to decide."""
+        try:
+            from app.services.news_trade_pipeline import news_trade_pipeline
+            from app.services.ai_brain import make_decision
+        except Exception as e:
+            logger.debug(f"news evaluator import skipped: {e}")
+            return
+
+        # Group active ai_brain strategies by user
+        ai_strats_by_user: Dict[str, dict] = {}
+        for strat in self._state.active_strategies.values():
+            if strat.get("strategy_type") == "ai_brain":
+                ai_strats_by_user.setdefault(str(strat["user_id"]), strat)
+
+        for user_id, strat in ai_strats_by_user.items():
+            pending = news_trade_pipeline.pop_pending_for_user(user_id, limit=3)
+            for cand in pending:
+                # Fetch quick price + closes via Yahoo for the candidate symbol
+                await self._fetch_market_prices([cand.symbol])
+                price = self._get_price(cand.symbol)
+                if not price or price <= 0:
+                    news_trade_pipeline.mark_rejected(cand, "no live price")
+                    continue
+
+                closes = await self._fetch_closes(cand.symbol, strat.get("timeframe", DEFAULT_TIMEFRAME_FALLBACK))
+                if not closes or len(closes) < 30:
+                    news_trade_pipeline.mark_rejected(cand, "insufficient price history")
+                    continue
+
+                # Ask the AI Brain for a decision biased by this news context
+                try:
+                    async with AsyncSessionLocal() as db:
+                        decision = await make_decision(
+                            db=db, user_id=user_id, symbol=cand.symbol, closes=closes,
+                        )
+                except Exception as e:
+                    news_trade_pipeline.mark_rejected(cand, f"AI brain error: {e}")
+                    continue
+
+                dec_dict = decision.as_dict()
+                if decision.decision == "BUY":
+                    # Inject AI decision and trigger the same execution path as ai_brain strategies
+                    strat["_ai_decision"] = dec_dict
+                    try:
+                        await self._execute_buy(str(strat["id"]), strat, cand.symbol, price)
+                        news_trade_pipeline.mark_executed(cand, dec_dict)
+                    except Exception as e:
+                        news_trade_pipeline.mark_rejected(cand, f"execute failed: {e}", dec_dict)
+                else:
+                    news_trade_pipeline.mark_rejected(
+                        cand, f"AI {decision.decision} ({decision.confidence}%)", dec_dict,
+                    )
+
+    async def _fetch_closes(self, symbol: str, timeframe: str = "1d") -> list:
+        """Best-effort historical closes fetch for a single symbol via Yahoo v8."""
+        import httpx
+        yf_sym = NSE_TO_YF.get(symbol.upper(), symbol.upper() + ".NS")
+        loop = asyncio.get_event_loop()
+
+        def _fetch() -> list:
+            period_map = {"1m": "5d", "5m": "5d", "15m": "5d", "30m": "5d",
+                          "1h": "1mo", "1d": "6mo", "1w": "2y"}
+            iv_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+                      "1h": "60m", "1d": "1d", "1w": "1wk"}
+            period = period_map.get(timeframe, "6mo")
+            iv = iv_map.get(timeframe, "1d")
+            try:
+                with httpx.Client(timeout=10) as c:
+                    r = c.get(
+                        f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_sym}?interval={iv}&range={period}",
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                quotes = data["chart"]["result"][0]["indicators"]["quote"][0]
+                return [c for c in (quotes.get("close") or []) if c is not None]
+            except Exception as e:
+                logger.warning(f"history fetch for {yf_sym}: {e}")
+                return []
+
+        return await loop.run_in_executor(None, _fetch)
 
     # ── Strategy management ─────────────────────────────────────
 
@@ -731,19 +934,30 @@ class AutoTradeEngine:
 
         angel_session = await get_angel(user_id)
         if angel_session:
-            return await self._place_angel_order(
+            order_id = await self._place_angel_order(
                 angel_session, symbol, exchange, side, quantity,
                 price, order_type
             )
+            if order_id:
+                self.record_broker_recovery()
+            else:
+                self.record_broker_failure("Angel One order returned empty id")
+            return order_id
 
         zerodha_session = await get_zerodha(user_id)
         if zerodha_session:
-            return await self._place_zerodha_order(
+            order_id = await self._place_zerodha_order(
                 zerodha_session, symbol, exchange, side, quantity,
                 price, order_type
             )
+            if order_id:
+                self.record_broker_recovery()
+            else:
+                self.record_broker_failure("Zerodha order returned empty id")
+            return order_id
 
         logger.warning(f"No broker connected for user {user_id[:8]}")
+        self.record_broker_failure("No broker connected")
         return ""
 
     async def _place_angel_order(
@@ -887,17 +1101,32 @@ class AutoTradeEngine:
     def _check_risk_limits(self) -> bool:
         """Check if we're within risk limits before placing new trades."""
         rc = self._state.risk_config
+        rs = self._state.risk_state
+        rs.last_risk_check_at = datetime.now(timezone.utc).isoformat()
+
+        # Manual circuit breaker (admin-tripped)
+        if rs.circuit_breaker_active:
+            logger.warning(f"🔴 Circuit breaker active: {rs.circuit_breaker_reason}")
+            return False
+
+        # Kill switch (manually or auto-armed)
+        if rs.kill_switch_armed:
+            logger.warning(f"💀 Kill switch armed: {rs.kill_switch_reason}")
+            return False
 
         # Max trades per day
         if self._state.total_trades_today >= rc.get("max_trades_per_day", 20):
             logger.warning("Max daily trades reached")
             return False
 
-        # Max daily loss
+        # Max daily loss → auto-arm the kill switch
         capital = rc.get("trading_capital", 100000)
         max_loss = capital * (rc.get("max_daily_loss_pct", 5.0) / 100)
         if self._state.today_pnl < -max_loss:
-            logger.warning(f"Max daily loss reached: ₹{self._state.today_pnl:,.2f}")
+            reason = (f"Daily loss ₹{self._state.today_pnl:,.2f} exceeded cap ₹{-max_loss:,.2f} "
+                      f"({rc.get('max_daily_loss_pct', 5.0):.1f}%)")
+            logger.warning(f"Max daily loss reached: {reason}")
+            self.arm_kill_switch(reason)
             return False
 
         # Max open positions

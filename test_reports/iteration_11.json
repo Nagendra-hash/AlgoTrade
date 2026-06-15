@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 11 testing for TradeAI Phase 4-7: News-driven candidates, Risk Hardening UI, Backtesting endpoint+page, Perf polish. All 12 backend pytest tests passed (auth, backtest strategies/run/invalid, status risk_state, CB trip/reset, kill switch arm/disarm, broker recovery reset, news GET/scan/toggle/reset). Frontend tested end-to-end: login → /backtest (all 7 form testids + 10 result testids present, equity curve & trade ledger render) → /auto-trade (risk-hardening-panel with circuit-breaker/kill-switch/broker sub-cards; news-candidates-panel with stat tiles + scan). Circuit breaker trip→reset flow works (uses native window.confirm). News scan updates summary timestamp. Sidebar nav-backtest routes to /backtest correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/auto-trade Risk Hardening - Circuit Breaker",
+        "issues": [
+          "Uses native window.confirm() for the trip confirmation. Functional but inconsistent with the rest of the app's custom modal styling — consider replacing with a Radix/shadcn AlertDialog for visual consistency."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/iteration_11_test.py",
+    "/app/test_reports/pytest/iteration_11.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/frontend/src/app/auto-trade/page.tsx is large (>800 lines based on grep hits up to line 754+). Consider extracting RiskHardeningPanel and NewsCandidatesPanel into separate component files for maintainability.",
+    "Circuit-breaker trip uses window.confirm(); not test-friendly without dialog handler. Acceptable but a custom modal with data-testid='cb-confirm-btn' would improve testability.",
+    "News pipeline TRACKED counter accumulates across scans (intentional per spec) — UI should expose a tooltip explaining this, otherwise users may think it's a stale value."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iteration_11_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12)",
+    "frontend": "100% (all listed flows pass)"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234!  (seeded by backend/seed_demo.py)",
+  "seed_data_creation": "None; used existing seeded demo user.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 11 fully verified Phase 4-7. Notes: (1) Backend pytest entry: pytest /app/backend/tests/iteration_11_test.py -v (uses system /root/.venv/bin/pytest; the local /app/backend/venv has a broken python symlink — do NOT rely on it). (2) Circuit-breaker trip uses native window.confirm — register page.on('dialog', lambda d: asyncio.create_task(d.accept())) in Playwright. (3) News pipeline returns 0 candidates when no ai_brain strategy is active for any user — that is intended, not a bug. (4) Backtest /run uses Yahoo Finance + synthetic fallback so it always returns data within ~5s. (5) The risk_state object includes broker_last_recovery_at (snake_case with _at suffix).",
+  "rca of the issue": "N/A — no failing tests."
+}

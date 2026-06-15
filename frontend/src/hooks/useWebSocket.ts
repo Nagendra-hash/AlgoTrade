@@ -5,9 +5,57 @@ import { WS_URL } from "@/lib/api";
 import type { WSMessage } from "@/types";
 
 // ── Singleton WebSocket store ─────────────────────────────────
-// Keeps ONE connection per user_id across all component re-renders
+// Keeps ONE connection per user_id across all component re-renders.
+// Reconnects with exponential backoff (1s → 2s → 4s → 8s → 16s → 30s max).
 const _sockets: Map<string, WebSocket> = new Map();
 const _listeners: Map<string, Set<(msg: WSMessage) => void>> = new Map();
+const _reconnectAttempts: Map<string, number> = new Map();
+const _reconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+// Dedupe identical messages received within this window (ms)
+const DEDUPE_WINDOW_MS = 1500;
+const _lastDedupeKey: Map<string, { key: string; ts: number }> = new Map();
+
+function _reconnectDelay(attempt: number): number {
+  // 1s, 2s, 4s, 8s, 16s, capped at 30s
+  return Math.min(1000 * Math.pow(2, attempt), 30_000);
+}
+
+function _scheduleReconnect(userId: string) {
+  const existing = _reconnectTimers.get(userId);
+  if (existing) clearTimeout(existing);
+
+  // If no more listeners, don't reconnect
+  if ((_listeners.get(userId)?.size ?? 0) === 0) return;
+
+  const attempt = (_reconnectAttempts.get(userId) ?? 0);
+  const delay = _reconnectDelay(attempt);
+  _reconnectAttempts.set(userId, attempt + 1);
+
+  console.info(`[useWebSocket] reconnect attempt ${attempt + 1} in ${delay}ms`);
+  const t = setTimeout(() => {
+    _reconnectTimers.delete(userId);
+    if ((_listeners.get(userId)?.size ?? 0) > 0) {
+      getOrCreateSocket(userId);
+    }
+  }, delay);
+  _reconnectTimers.set(userId, t);
+}
+
+function _dedupeOk(userId: string, msg: WSMessage): boolean {
+  // Build a coarse signature; if same signature arrived within window, skip
+  try {
+    const key = JSON.stringify({ t: msg.type, d: (msg as any).data });
+    const prev = _lastDedupeKey.get(userId);
+    const now = Date.now();
+    if (prev && prev.key === key && now - prev.ts < DEDUPE_WINDOW_MS) {
+      return false;
+    }
+    _lastDedupeKey.set(userId, { key, ts: now });
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 function getOrCreateSocket(userId: string): WebSocket {
   const existing = _sockets.get(userId);
@@ -17,13 +65,12 @@ function getOrCreateSocket(userId: string): WebSocket {
   const ws = new WebSocket(`${WS_URL}/ws/notifications/${userId}`);
   _sockets.set(userId, ws);
   ws.onopen = () => {
+    // Successful connection — reset retry counter.
+    _reconnectAttempts.set(userId, 0);
     // If all listeners have already unsubscribed (e.g. component unmounted
     // during connection), close gracefully to avoid dangling connections.
     if (!_listeners.has(userId) || (_listeners.get(userId)?.size ?? 0) === 0) {
       ws.close(1000, "No listeners");
-      // Only clean up the map if this socket is still the active one.
-      // Prevents an old socket's onopen from deleting a newer socket
-      // created during a mount→unmount→remount cycle (StrictMode).
       if (_sockets.get(userId) === ws) {
         _sockets.delete(userId);
       }
@@ -32,20 +79,20 @@ function getOrCreateSocket(userId: string): WebSocket {
   ws.onmessage = (e) => {
     try {
       const msg: WSMessage = JSON.parse(e.data);
+      if (!_dedupeOk(userId, msg)) return;
       const handlers = _listeners.get(userId);
       handlers?.forEach((fn) => fn(msg));
     } catch (err) {
       console.warn("[useWebSocket] notification message parse failed:", err);
     }
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     _sockets.delete(userId);
-    // Reconnect after 3 seconds if there are still active listeners
-    setTimeout(() => {
-      if (_listeners.has(userId) && (_listeners.get(userId)?.size ?? 0) > 0) {
-        getOrCreateSocket(userId);
-      }
-    }, 3000);
+    // Skip reconnect on intentional close (code 1000) without active listeners
+    if (ev.code === 1000 && (_listeners.get(userId)?.size ?? 0) === 0) {
+      return;
+    }
+    _scheduleReconnect(userId);
   };
   ws.onerror = () => ws.close();
   return ws;

@@ -1,7 +1,7 @@
 """Iter6 — Full functional smoke after env recreate (Postgres + Redis + migrations + seed)."""
 import os, uuid, time, requests, pytest
 
-EXT = "https://5e0d847d-b059-4b8e-9818-9c3a87b9ce69.preview.emergentagent.com"
+EXT = "https://algo-hardened.preview.emergentagent.com"
 LOCAL = "http://localhost:8001"
 API = f"{EXT}/api/v1"
 DEMO = {"email": "demo@tradeai.com", "password": "Demo1234!"}
