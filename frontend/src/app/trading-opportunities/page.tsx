@@ -2,11 +2,11 @@
 // Path: frontend/src/app/trading-opportunities/page.tsx
 // Trading Opportunities — Phase 4. Live composite of screener + sentiment + 52W range.
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { RefreshCw, Search, Target, TrendingUp, TrendingDown, AlertTriangle, Info } from "lucide-react";
+import { RefreshCw, Search, Target, TrendingUp, AlertTriangle, Info, ShoppingCart, Eye, Ban, Check, X } from "lucide-react";
 
 interface Opportunity {
   symbol: string; company: string; ltp: number | null; change_pct: number | null;
@@ -48,11 +48,49 @@ function fmtVol(n: number | null) {
 export default function TradingOpportunitiesPage() {
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("all");
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const qc = useQueryClient();
+
   const { data, isLoading, isError, refetch, isFetching } = useQuery<ApiResp>({
     queryKey: ["opportunities"],
     queryFn: async () => (await api.get("/opportunities", { params: { limit: 30 } })).data,
     staleTime: 60_000,
     refetchInterval: 60_000,
+  });
+
+  const showFlash = (kind: "ok" | "err", text: string) => {
+    setFlash({ kind, text });
+    setTimeout(() => setFlash(null), 4000);
+  };
+
+  const buyMut = useMutation({
+    mutationFn: (o: Opportunity) =>
+      api.post(`/opportunities/${o.symbol}/buy`, { symbol: o.symbol, exchange: "NSE", snapshot: o }).then((r) => r.data),
+    onSuccess: (d) => {
+      showFlash("ok", `🟢 ${d.symbol} added to Auto-Trade engine · SL ${d.strategy.stop_loss_pct}% / TP ${d.strategy.take_profit_pct}%`);
+      qc.invalidateQueries({ queryKey: ["watchlist"] });
+    },
+    onError: () => showFlash("err", "Buy failed — please try again"),
+  });
+
+  const watchMut = useMutation({
+    mutationFn: (o: Opportunity) =>
+      api.post(`/opportunities/${o.symbol}/watch`, { symbol: o.symbol, exchange: "NSE", snapshot: o }).then((r) => r.data),
+    onSuccess: (d) => {
+      showFlash("ok", d.added ? `👁  ${d.symbol} added to Watchlist` : `${d.symbol} already in Watchlist`);
+      qc.invalidateQueries({ queryKey: ["watchlist"] });
+    },
+    onError: () => showFlash("err", "Watch failed — please try again"),
+  });
+
+  const avoidMut = useMutation({
+    mutationFn: (o: Opportunity) =>
+      api.post(`/opportunities/${o.symbol}/avoid`, { symbol: o.symbol, exchange: "NSE" }).then((r) => r.data),
+    onSuccess: (d) => {
+      showFlash("ok", `🚫 ${d.symbol} hidden from feed`);
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+    },
+    onError: () => showFlash("err", "Avoid failed — please try again"),
   });
 
   const items = data?.items ?? [];
@@ -75,6 +113,21 @@ export default function TradingOpportunitiesPage() {
   return (
     <DashboardLayout>
       <div className="space-y-5" data-testid="opportunities-root">
+        {/* Flash toast */}
+        {flash && (
+          <div
+            data-testid="opp-flash"
+            className={cn(
+              "fixed top-4 right-4 z-50 max-w-md px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-md flex items-start gap-3 animate-in slide-in-from-top",
+              flash.kind === "ok"
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-100"
+                : "bg-red-500/15 border-red-500/40 text-red-100",
+            )}>
+            {flash.kind === "ok" ? <Check className="h-4 w-4 mt-0.5 shrink-0" /> : <X className="h-4 w-4 mt-0.5 shrink-0" />}
+            <p className="text-sm font-medium leading-relaxed">{flash.text}</p>
+            <button onClick={() => setFlash(null)} className="ml-2 opacity-60 hover:opacity-100"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-end justify-between flex-wrap gap-3">
           <div>
@@ -128,18 +181,18 @@ export default function TradingOpportunitiesPage() {
                   <Th>News</Th><Th>Bull</Th><Th>Bear</Th>
                   <Th title="Promoter %">Prom</Th><Th>FII</Th><Th>DII</Th><Th>M-Cap</Th>
                   <Th>Sector</Th><Th>RSI</Th><Th>MACD</Th>
-                  <Th>52W H</Th><Th>52W L</Th><Th>Risk</Th><Th>Conf</Th><Th>Action</Th>
+                  <Th>52W H</Th><Th>52W L</Th><Th>Risk</Th><Th>Conf</Th><Th>Rec</Th><Th>Action</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/60">
                 {isLoading && (
-                  <tr><td colSpan={20} className="px-4 py-12 text-center text-gray-500">Loading live opportunities…</td></tr>
+                  <tr><td colSpan={21} className="px-4 py-12 text-center text-gray-500">Loading live opportunities…</td></tr>
                 )}
                 {!isLoading && isError && (
-                  <tr><td colSpan={20} className="px-4 py-12 text-center text-red-400">Failed to load. Try refreshing.</td></tr>
+                  <tr><td colSpan={21} className="px-4 py-12 text-center text-red-400">Failed to load. Try refreshing.</td></tr>
                 )}
                 {!isLoading && !isError && filtered.length === 0 && (
-                  <tr><td colSpan={20} className="px-4 py-12 text-center text-gray-500" data-testid="opportunities-empty">No live data available.</td></tr>
+                  <tr><td colSpan={21} className="px-4 py-12 text-center text-gray-500" data-testid="opportunities-empty">No live data available.</td></tr>
                 )}
                 {filtered.map((o) => (
                   <tr key={o.symbol} className="hover:bg-gray-800/30" data-testid={`opp-row-${o.symbol}`}>
@@ -179,6 +232,34 @@ export default function TradingOpportunitiesPage() {
                       <span data-testid={`opp-action-${o.symbol}`} className={cn("inline-flex px-2.5 py-1 rounded-md border text-[11px] font-bold", ACTION_COLORS[o.recommended_action])}>
                         {o.recommended_action}
                       </span>
+                    </Td>
+                    <Td>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          data-testid={`opp-buy-${o.symbol}`}
+                          onClick={() => buyMut.mutate(o)}
+                          disabled={buyMut.isPending && buyMut.variables?.symbol === o.symbol}
+                          title="Add to Auto-Trade engine"
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40">
+                          <ShoppingCart className="h-3 w-3" /> Buy
+                        </button>
+                        <button
+                          data-testid={`opp-watch-${o.symbol}`}
+                          onClick={() => watchMut.mutate(o)}
+                          disabled={watchMut.isPending && watchMut.variables?.symbol === o.symbol}
+                          title="Add to Watchlist"
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40">
+                          <Eye className="h-3 w-3" /> Watch
+                        </button>
+                        <button
+                          data-testid={`opp-avoid-${o.symbol}`}
+                          onClick={() => avoidMut.mutate(o)}
+                          disabled={avoidMut.isPending && avoidMut.variables?.symbol === o.symbol}
+                          title="Hide from feed"
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-300 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40">
+                          <Ban className="h-3 w-3" /> Avoid
+                        </button>
+                      </div>
                     </Td>
                   </tr>
                 ))}

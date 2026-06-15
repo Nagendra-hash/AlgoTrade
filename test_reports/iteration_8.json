@@ -1,0 +1,39 @@
+{
+  "summary": "Iter8 — Phase 1+2 upgrade (Trading Opportunities Buy/Watch/Avoid wiring + new Auto-Trade dashboard) tested end-to-end. BACKEND: 19/19 pytest GREEN on /app/backend/tests/test_iter9_opps_autotrade.py — POST /opportunities/{symbol}/watch (201 + idempotent), POST /opportunities/{symbol}/avoid (201 + idempotent + feed filters via avoided_count), DELETE /opportunities/{symbol}/avoid, POST /opportunities/{symbol}/buy (creates watchlist row + Strategy strategy_type='hybrid_trend_momentum' with sl/tp 2%/4% derived from risk_level='moderate' + refreshes engine), GET /watchlist with snapshot intact, DELETE /watchlist/{symbol}, GET /auto-trade/status (all 7 keys present), POST /auto-trade/start mode=paper flips is_running:true + mode:'paper', POST /auto-trade/stop flips is_running:false, PUT /auto-trade/risk persists trading_capital + max_daily_loss_pct, GET /auto-trade/positions + /auto-trade/activity all 200. FRONTEND: login OK; sidebar shows new 'Auto Trade' nav with data-testid='nav-auto-trade' + AI badge; /auto-trade page renders pre-flight checkpoints (Broker=angel one·N513357, AI Brain=rule-based, Engine=Stopped), Settings + Start (Paper) + Start (Live) buttons (data-testid=auto-trade-settings-btn / auto-trade-start-paper / auto-trade-start-live / auto-trade-stop), all 6 stat tiles (stat-status, stat-mode, stat-strats=2, stat-open=0, stat-pnl=+₹0, stat-winrate=0%), Engine Positions + Today's Activity tables. Start (Paper) → status flips STOPPED→RUNNING; Stop → RUNNING→STOPPED. RiskSettings panel opens, fields editable, risk-save persists (verified via PUT /auto-trade/risk returning updated trading_capital=150000). /trading-opportunities: 30 rows render each with opp-buy-{sym} / opp-watch-{sym} / opp-avoid-{sym} buttons; clicking Watch → 201 + opp-flash 'KOTAKBANK already in Watchlist'; clicking Avoid (EICHERMOT) → 201 + opp-flash '🚫 EICHERMOT hidden from feed' + symbol removed from DOM on automatic refetch. End-to-end integration verified GREEN.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter9_opps_autotrade.py",
+    "/app/test_reports/pytest/iter9_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Buy endpoint correctly chains 3 side-effects in one transaction: watchlist upsert → Strategy row → auto_trade_engine._refresh_active_strategies(). Engine refresh is wrapped in try/except so a refresh failure won't poison the API response — good defensive coding.",
+    "Opportunities feed correctly filters avoided symbols via UserOpportunityPref join and surfaces avoided_count for the UI.",
+    "Both /watchlist POST and /opportunities/{sym}/watch are idempotent (UniqueConstraint(user_id,symbol,exchange) + upsert path) and refresh snapshot/source on subsequent calls — matches spec.",
+    "Strategy stop_loss_pct/take_profit_pct correctly derived from snapshot.risk_level via lookup dict (low=1.5, moderate=2.0, elevated=2.5, high=3.0) with TP = 2×SL minimum 1:2 RR — solid risk-management default.",
+    "Frontend Auto-Trade page test IDs DIFFER from the review request spec: spec says 'at-start-paper' but actual is 'auto-trade-start-paper' (same for stop/settings). The 6 stat tiles (stat-status/stat-mode/stat-strats/stat-open/stat-pnl/stat-winrate) match the spec exactly. Not a bug, just spec drift — recommend updating spec or aligning test IDs.",
+    "RiskSettings panel writes through PUT /auto-trade/risk and re-fetches status — clean 3-step flow.",
+    "Iter7 LOW-priority items (SentimentBadge nested button, en-US@posix Intl error, Portfolio 'Showing real portfolio data from Angel One ()' banner) were NOT re-tested in this iteration — main agent stated they were fixed in iter8 but no evidence captured here."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter9_opps_autotrade.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 pytest)",
+    "frontend": "100% — all Phase 1+2 flows verified (auto-trade start/stop, settings save, opportunities buy/watch/avoid + flash toast + feed refetch removes avoided row)"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md) — verified valid.",
+  "seed_data_creation": "Test symbols TESTSYM / TESTAVOID / TESTBUY created and cleaned up within pytest run. Real-symbol click during UI test (KOTAKBANK watch + EICHERMOT avoid) was cleaned up via DELETE calls at end of script.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 1 (Trading Opportunities Buy/Watch/Avoid wiring) and Phase 2 (Auto-Trade dashboard) are both fully GREEN. The new pytest file /app/backend/tests/test_iter9_opps_autotrade.py covers 19 endpoints and is a good regression suite for future iterations. Auto-Trade button data-testids are auto-trade-start-paper / auto-trade-start-live / auto-trade-stop / auto-trade-settings-btn (NOT the at-* prefix the spec mentioned). Opp action buttons use opp-buy-{SYMBOL} / opp-watch-{SYMBOL} / opp-avoid-{SYMBOL} as specced. For next phases, demo user has 2 active strategies (one from a prior opp-buy on TESTBUY), Angel One is connected (N513357), Telegram wired, OpenAI quota-exhausted (rule-based fallback active).",
+  "rca_of_the_issue": "N/A — no bugs found in Phase 1+2 implementation."
+}

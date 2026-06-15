@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard, TrendingUp, Star, Target, ShoppingCart,
-  Briefcase, Wallet, Bell, Cpu, Bot, Brain, Plug,
+  Briefcase, Wallet, Bell, Cpu, Bot, Brain, Plug, Zap,
   LogOut, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
@@ -19,6 +19,7 @@ const NAV = [
     { label: "Trading Opportunities", href: "/trading-opportunities", icon: Target,          testid: "nav-trading-opportunities", badge: "LIVE" },
   ]},
   { group: "Execution", items: [
+    { label: "Auto Trade", href: "/auto-trade", icon: Zap,          testid: "nav-auto-trade", badge: "AI" },
     { label: "Orders",    href: "/orders",    icon: ShoppingCart, testid: "nav-orders" },
     { label: "Positions", href: "/positions", icon: Briefcase,    testid: "nav-positions" },
     { label: "Portfolio", href: "/portfolio", icon: Wallet,       testid: "nav-portfolio" },
