@@ -489,31 +489,22 @@ class AutoTradeEngine:
         return 0
 
     def _execute_custom_code(self, code: str, closes: list) -> Optional[int]:
-        """Safely execute custom strategy code with restricted builtins."""
-        try:
-            import pandas as pd
-            import numpy as np
+        """
+        DEPRECATED — custom Python execution removed for security (was CVE risk via `exec()`).
 
-            df = pd.DataFrame({"close": closes, "volume": [0] * len(closes)})
-            # Restrict builtins for safety — only allow safe operations
-            safe_builtins = {
-                "range": range, "len": len, "int": int, "float": float,
-                "str": str, "list": list, "dict": dict, "tuple": tuple,
-                "min": min, "max": max, "sum": sum, "abs": abs,
-                "round": round, "enumerate": enumerate, "zip": zip,
-                "map": map, "filter": filter, "sorted": sorted,
-                "True": True, "False": False, "None": None,
-            }
-            namespace = {"pd": pd, "np": np, "df": df, "__builtins__": safe_builtins}
-            exec(code, namespace)
-            gen_func = namespace.get("generate_signals")
-            if gen_func:
-                result = gen_func(df)
-                if "signal" in result.columns:
-                    last_signal = result["signal"].iloc[-1]
-                    return int(last_signal)
-        except Exception as e:
-            logger.debug(f"Custom code execution failed: {e}")
+        AI-generated strategies now route through the built-in strategy_type
+        dispatch ('trend_following', 'momentum', 'mean_reversion', 'hybrid_trend_momentum').
+        The AI populates `parameters` (fast_period, slow_period, roc_period, bb_std, etc.)
+        which drive the safe built-in handlers above.
+
+        Returns None — caller falls back to its strategy_type branch.
+        """
+        if code:
+            logger.debug(
+                "_execute_custom_code is deprecated and disabled for security. "
+                "Use strategy_type + parameters instead. Code length: %d chars.",
+                len(code or ""),
+            )
         return None
 
     # ── Order execution ─────────────────────────────────────────

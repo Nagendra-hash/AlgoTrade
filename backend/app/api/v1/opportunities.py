@@ -146,75 +146,57 @@ async def opportunity_unavoid(
     return {"action": "unavoid", "symbol": symbol.upper()}
 
 
-@router.post("/{symbol}/buy", status_code=201)
-async def opportunity_buy(
-    symbol: str,
-    body: OpportunityAction,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Buy = add to watchlist + create a deployed strategy that the auto-trade engine
-    will pick up on its next tick.
+# ── Helpers for opportunity_buy (extracted to keep handler simple) ───────────
 
-    Setup logic:
-    • Strategy type   = hybrid_trend_momentum (trend + momentum confirmation)
-    • Symbols         = [symbol]
-    • Stop-loss       = 2 %
-    • Take-profit     = 4 %
-    • Trailing stop   = 1.5 %
-    • Max position    = 10 % of capital
-    • Status          = active + paper (engine ticks immediately)
-    """
-    symbol = symbol.upper().strip()
-    snap = body.snapshot or {}
+_RISK_TO_SL: dict[str, float] = {"low": 1.5, "moderate": 2.0, "elevated": 2.5, "high": 3.0}
 
-    # 1) Add to watchlist (idempotent)
+
+def _risk_to_sl_tp(risk_level: str) -> tuple[float, float]:
+    """Map snapshot risk_level → (stop-loss %, take-profit %) with 1:2 minimum risk-reward."""
+    sl = _RISK_TO_SL.get(risk_level, 2.0)
+    return sl, sl * 2
+
+
+async def _upsert_buy_watchlist(db: AsyncSession, user_id, symbol: str, exchange: str, snapshot: dict) -> WatchlistItem:
     r = await db.execute(
         select(WatchlistItem).where(
-            WatchlistItem.user_id == current_user.id,
+            WatchlistItem.user_id == user_id,
             WatchlistItem.symbol == symbol,
-            WatchlistItem.exchange == body.exchange,
+            WatchlistItem.exchange == exchange,
         )
     )
     wl = r.scalar_one_or_none()
     if wl:
         wl.source = "buy"
-        if snap:
-            wl.snapshot = snap
+        if snapshot:
+            wl.snapshot = snapshot
     else:
-        wl = WatchlistItem(
-            user_id=current_user.id,
-            symbol=symbol,
-            exchange=body.exchange,
-            source="buy",
-            snapshot=snap,
-        )
+        wl = WatchlistItem(user_id=user_id, symbol=symbol, exchange=exchange, source="buy", snapshot=snapshot)
         db.add(wl)
     await db.flush()
+    return wl
 
-    # 2) Create a deployed strategy for the auto-trade engine
-    confidence = snap.get("confidence", 60)
+
+def _build_opp_strategy(user_id, symbol: str, exchange: str, snap: dict, sl_pct: float, tp_pct: float) -> Strategy:
     risk_level = snap.get("risk_level", "moderate")
-    sl_pct = {"low": 1.5, "moderate": 2.0, "elevated": 2.5, "high": 3.0}.get(risk_level, 2.0)
-    tp_pct = sl_pct * 2  # 1:2 risk-reward minimum
-
-    strat_name = f"Opp · {symbol} ({snap.get('recommended_action', 'Buy')})"
-    description = snap.get("ai_summary") or f"Auto-generated from Trading Opportunities — confidence {confidence:.0f}/100, risk {risk_level}."
-
-    strategy = Strategy(
-        user_id=current_user.id,
-        name=strat_name,
+    confidence = snap.get("confidence", 60)
+    description = snap.get("ai_summary") or (
+        f"Auto-generated from Trading Opportunities — confidence {confidence:.0f}/100, risk {risk_level}."
+    )
+    return Strategy(
+        user_id=user_id,
+        name=f"Opp · {symbol} ({snap.get('recommended_action', 'Buy')})",
         description=description,
         strategy_type="hybrid_trend_momentum",
         user_prompt=f"Bought from Trading Opportunities feed. AI says: {snap.get('ai_summary', 'High confidence setup')}",
         entry_logic="SMA fast/slow crossover with Momentum ROC > 1% confirmation",
         exit_logic=f"Stop-loss at -{sl_pct}% OR Take-profit at +{tp_pct}% OR Trailing stop 1.5%",
-        risk_rules=f"Max position size: 10% of capital. Max drawdown: 10%.",
+        risk_rules="Max position size: 10% of capital. Max drawdown: 10%.",
         indicators=["SMA(20)", "SMA(50)", "ROC(10)"],
         parameters={"fast_period": 20, "slow_period": 50, "roc_period": 10, "roc_threshold": 1.0},
         symbols=[symbol],
         timeframe="1d",
-        exchange=body.exchange,
+        exchange=exchange,
         tags=["opportunity-buy", risk_level],
         status=StrategyStatus.ACTIVE.value,
         is_paper_active=True,
@@ -226,26 +208,49 @@ async def opportunity_buy(
         max_position_size=10.0,
         max_drawdown_pct=10.0,
     )
-    db.add(strategy)
-    await db.flush()
 
-    # 3) Refresh the engine cache so it picks up the new strategy on next tick
+
+async def _notify_engine_refresh() -> None:
+    """Refresh engine cache so the new strategy is picked up on the next tick."""
     try:
         from app.services.auto_trade_engine import auto_trade_engine
         await auto_trade_engine._refresh_active_strategies()  # type: ignore[attr-defined]
     except Exception as e:
         logger.warning(f"Engine refresh after opp-buy failed: {e}")
 
+
+@router.post("/{symbol}/buy", status_code=201)
+async def opportunity_buy(
+    symbol: str,
+    body: OpportunityAction,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Buy = (1) add to watchlist + (2) create a deployed `hybrid_trend_momentum`
+    Strategy + (3) notify the engine to refresh. SL/TP derived from snapshot.risk_level
+    with 1:2 risk-reward minimum."""
+    symbol = symbol.upper().strip()
+    snap = body.snapshot or {}
+
+    wl = await _upsert_buy_watchlist(db, current_user.id, symbol, body.exchange, snap)
+
+    sl_pct, tp_pct = _risk_to_sl_tp(snap.get("risk_level", "moderate"))
+    strategy = _build_opp_strategy(current_user.id, symbol, body.exchange, snap, sl_pct, tp_pct)
+    db.add(strategy)
+    await db.flush()
+
+    await _notify_engine_refresh()
+
     return {
         "action": "buy",
         "symbol": symbol,
         "watchlist_id": str(wl.id),
         "strategy": {
-            "id":            str(strategy.id),
-            "name":          strategy.name,
-            "type":          strategy.strategy_type,
-            "stop_loss_pct": sl_pct,
-            "take_profit_pct": tp_pct,
+            "id":               str(strategy.id),
+            "name":             strategy.name,
+            "type":             strategy.strategy_type,
+            "stop_loss_pct":    sl_pct,
+            "take_profit_pct":  tp_pct,
             "trailing_stop_pct": 1.5,
         },
         "engine_will_pick_up_within_seconds": 30,

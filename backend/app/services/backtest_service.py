@@ -71,7 +71,7 @@ def _synthetic_candles(symbol: str, interval: str, period: str) -> list:
     bars = bars_map.get(iv, {}).get(period, 132)
     step_sec = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400, "1wk": 604800}.get(iv, 86400)
 
-    seed = int(hashlib.md5(symbol.encode()).hexdigest()[:8], 16)
+    seed = int(hashlib.sha256(symbol.encode()).hexdigest()[:8], 16)
     rnd = random.Random(seed)
     price = 1000 + (seed % 4000)  # Starting price between 1000-5000
     drift = 0.0003

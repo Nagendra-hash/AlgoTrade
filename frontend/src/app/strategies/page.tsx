@@ -263,8 +263,8 @@ export default function StrategyPage() {
                       <div key={section.title} className="bg-gray-800 rounded-xl p-4">
                         <p className={cn("font-bold text-sm mb-3", section.color)}>{section.title}</p>
                         <div className="space-y-1.5">
-                          {section.content.split("\n").filter(Boolean).map((line, i) => (
-                            <p key={i} className="text-gray-300 text-xs leading-relaxed">
+                          {section.content.split("\n").filter(Boolean).map((line) => (
+                            <p key={line} className="text-gray-300 text-xs leading-relaxed">
                               {line.startsWith("-") ? <>· {line.slice(1).trim()}</> : line}
                             </p>
                           ))}

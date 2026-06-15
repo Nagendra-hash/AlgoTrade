@@ -72,8 +72,8 @@ function TooltipContent({ symbol }: { symbol: string }) {
         <div>
           <p className="text-gray-500 text-[10px] font-semibold uppercase mb-1">Recent Headlines</p>
           <ul className="space-y-1">
-            {data.headlines.slice(0, 2).map((h, i) => (
-              <li key={i} className="text-gray-500 text-[11px] leading-snug line-clamp-2">· {h}</li>
+            {data.headlines.slice(0, 2).map((h) => (
+              <li key={h} className="text-gray-500 text-[11px] leading-snug line-clamp-2">· {h}</li>
             ))}
           </ul>
         </div>

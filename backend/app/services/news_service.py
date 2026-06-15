@@ -366,7 +366,7 @@ async def _fetch_rss(client: httpx.AsyncClient, source: str, url: str) -> List[d
                 pub_dt = datetime.now(timezone.utc)
             score, conf = _score(title, summary)
             articles.append({
-                "id": hashlib.md5(link.encode()).hexdigest(),
+                "id": hashlib.sha256(link.encode()).hexdigest(),
                 "title": title,
                 "summary": summary[:400],
                 "url": link,
@@ -402,7 +402,7 @@ async def _fetch_newsapi(symbols: Optional[List[str]] = None) -> List[dict]:
             score, conf = _score(title, summary)
             source_name = item.get("source", {}).get("name", "NewsAPI")
             articles.append({
-                "id": hashlib.md5(item.get("url", "").encode()).hexdigest(),
+                "id": hashlib.sha256(item.get("url", "").encode()).hexdigest(),
                 "title": title,
                 "summary": summary[:400],
                 "url": item.get("url", ""),
@@ -461,7 +461,7 @@ async def _fetch_newsapi_by_source(
             summary = item.get("description", "") or ""
             score, conf = _score(title, summary)
             articles.append({
-                "id": hashlib.md5(item.get("url", "").encode()).hexdigest(),
+                "id": hashlib.sha256(item.get("url", "").encode()).hexdigest(),
                 "title": title,
                 "summary": summary[:400],
                 "url": item.get("url", ""),
@@ -494,7 +494,7 @@ async def _fetch_finnhub(symbols: Optional[List[str]] = None) -> List[dict]:
             summary = item.get("summary", "") or ""
             score, conf = _score(title, summary)
             articles.append({
-                "id": str(item.get("id", hashlib.md5(title.encode()).hexdigest())),
+                "id": str(item.get("id", hashlib.sha256(title.encode()).hexdigest())),
                 "title": title,
                 "summary": summary[:400],
                 "url": item.get("url", ""),

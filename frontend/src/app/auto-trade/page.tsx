@@ -259,7 +259,7 @@ export default function AutoTradePage() {
                 <tr><td colSpan={8} className="text-center text-gray-500 py-12">No activity today.</td></tr>
               )}
               {activity.slice().reverse().map((a, i) => (
-                <tr key={i} className="hover:bg-gray-800/30" data-testid={`activity-${i}`}>
+                <tr key={`${a.time}-${a.symbol}-${a.action}-${i}`} className="hover:bg-gray-800/30" data-testid={`activity-${i}`}>
                   <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{a.time}</td>
                   <td className="text-center font-bold text-white">{a.symbol}</td>
                   <td className={cn("text-center font-bold", a.action === "BUY" ? "text-emerald-400" : "text-red-400")}>{a.action}</td>

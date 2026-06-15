@@ -83,7 +83,9 @@ async def _call_openai_compatible(cfg: AIModelConfig, prompt: str, system_prompt
     if cfg.provider == "ollama":
         base = cfg.base_url or settings.OLLAMA_BASE_URL or "http://localhost:11434"
         url = f"{base.rstrip('/')}/v1/chat/completions"
-        api_key = "ollama"   # any non-empty string works for ollama's openai-compat server
+        # Ollama's OpenAI-compatible server requires *some* Authorization header but ignores the value.
+        # This is documented behavior (https://ollama.com/blog/openai-compatibility) — not a secret.
+        api_key = "ollama-noauth"  # noqa: S105  (false-positive: not a credential)
     else:
         if not cfg.api_key:
             raise RuntimeError(f"API key required for {cfg.provider}")

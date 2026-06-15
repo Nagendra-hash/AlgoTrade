@@ -34,7 +34,9 @@ function getOrCreateSocket(userId: string): WebSocket {
       const msg: WSMessage = JSON.parse(e.data);
       const handlers = _listeners.get(userId);
       handlers?.forEach((fn) => fn(msg));
-    } catch {}
+    } catch (err) {
+      console.warn("[useWebSocket] notification message parse failed:", err);
+    }
   };
   ws.onclose = () => {
     _sockets.delete(userId);
@@ -161,11 +163,15 @@ export function useMarketWebSocket(symbols: string[], onQuote?: (data: unknown) 
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === "quote") onQuote?.(msg.data);
-        } catch {}
+        } catch (err) {
+          console.warn("[useWebSocket] market message parse failed:", err);
+        }
       };
       socket.onclose  = () => { if (!destroyed.current) setConnected(false); };
       socket.onerror  = () => socket.close();
-    } catch {}
+    } catch (err) {
+      console.warn("[useWebSocket] market socket setup failed:", err);
+    }
 
     return () => {
       destroyed.current = true;
