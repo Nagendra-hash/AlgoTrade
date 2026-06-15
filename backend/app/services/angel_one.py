@@ -234,12 +234,56 @@ async def load_all_active_sessions() -> int:
 
 async def login(api_key: str, client_id: str,
                 password: str, totp_secret: str) -> dict:
-    """Login to Angel One and return JWT tokens."""
+    """Login to Angel One and return JWT tokens.
+
+    Notes on common user errors (all of these surface as the unhelpful Angel One
+    response "Invalid totp and client combination"):
+
+      • `password` must be the 4-digit trading **MPIN**, NOT the web login password.
+      • `totp_secret` must be the base32 secret (e.g. "JBSWY3DPEHPK3PXP…"), NOT
+        the rotating 6-digit code.
+      • `client_id` is the alphanumeric Angel One client code (e.g. "A123456"),
+        case-sensitive. Email addresses are rejected by Angel One.
+      • `api_key` must be the **SmartAPI** key from smartapi.angelone.in → My Apps.
+
+    This function pre-validates inputs so we return a clear actionable error
+    instead of passing junk to Angel One and getting their generic message back.
+    """
+    api_key     = (api_key or "").strip()
+    client_id   = (client_id or "").strip().upper()  # Angel One client IDs are upper-case
+    password    = (password or "").strip()
+    totp_secret = (totp_secret or "").strip().replace(" ", "")  # base32 secrets often pasted with spaces
+
+    # ── Pre-flight validation ────────────────────────────────────
+    if "@" in client_id:
+        return {"success": False, "error":
+                "Client ID looks like an email. Use your Angel One client code "
+                "(e.g. A123456), not your login email."}
+
+    if len(password) > 12 or not password.isdigit():
+        # SmartAPI's "password" is actually the trading MPIN (4-6 digits)
+        return {"success": False, "error":
+                "Password must be your numeric trading MPIN (4 digits), not your "
+                "web login password."}
+
+    # TOTP secret must be base32. A 6-digit number means the user pasted the
+    # *current code* by mistake — that won't work because it's already expired
+    # by the time we send it.
+    if totp_secret.isdigit() and len(totp_secret) == 6:
+        return {"success": False, "error":
+                "TOTP Secret should be the long base32 secret from "
+                "smartapi.angelone.in/enable-totp (e.g. JBSWY3DPEHPK3PXP…), "
+                "not the rotating 6-digit code shown in your authenticator app."}
+
+    import pyotp, base64
     try:
-        import pyotp
+        # Validate base32 by attempting to decode (pyotp does this lazily)
+        base64.b32decode(totp_secret.upper(), casefold=True)
         totp = pyotp.TOTP(totp_secret).now()
     except Exception:
-        totp = totp_secret
+        return {"success": False, "error":
+                "TOTP Secret is not a valid base32 string. Re-copy it from "
+                "smartapi.angelone.in/enable-totp."}
 
     try:
         async with httpx.AsyncClient(timeout=20) as c:
@@ -262,9 +306,36 @@ async def login(api_key: str, client_id: str,
                     "refresh_token": d.get("refreshToken", ""),
                     "feed_token":    d.get("feedToken", ""),
                 }
-            return {"success": False, "error": data.get("message", "Login failed")}
+            # Translate Angel One's vague messages into something actionable
+            raw = (data.get("message") or "Login failed").strip()
+            code = (data.get("errorcode") or data.get("errorCode") or "").strip()
+            translated = _translate_angel_error(raw, code)
+            logger.warning(f"Angel One login failed: code={code} raw='{raw}' translated='{translated}'")
+            return {"success": False, "error": translated}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"Could not reach Angel One: {e}"}
+
+
+def _translate_angel_error(message: str, code: str) -> str:
+    """Convert Angel One's terse error messages into actionable hints."""
+    m = message.lower()
+    if "totp" in m and ("client" in m or "combination" in m):
+        return ("Angel One rejected the credentials. Most common causes:\n"
+                "  1. The Password field must be your 4-digit trading MPIN, not the web login password.\n"
+                "  2. The TOTP Secret must be the base32 secret from smartapi.angelone.in/enable-totp, "
+                "not the rotating 6-digit code.\n"
+                "  3. The Client ID must be in upper-case (e.g. A123456).\n"
+                "  4. Your server clock may be out of sync (TOTP is time-based).")
+    if "client" in m and "exist" in m:
+        return "Client ID not recognised by Angel One. Double-check your client code."
+    if "invalid password" in m or "password is wrong" in m:
+        return "Trading MPIN is wrong. Note: this is the 4-digit PIN, not your web login password."
+    if "invalid totp" in m:
+        return ("TOTP is invalid — either the secret is wrong, or the server time is out of sync. "
+                "Make sure you pasted the base32 secret from smartapi.angelone.in/enable-totp.")
+    if "rate" in m or "too many" in m:
+        return "Angel One rate-limited the login. Wait a minute before retrying."
+    return f"Angel One: {message}"
 
 
 async def _refresh_token(api_key: str, refresh_token: str) -> Optional[str]:

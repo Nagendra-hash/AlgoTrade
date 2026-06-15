@@ -160,15 +160,35 @@ function AngelOneSection() {
         <div>
           <label className="text-gray-400 text-xs font-semibold block mb-1.5 uppercase tracking-wide">Client ID</label>
           <input
+            data-testid="angel-client-id"
             type="text"
             value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            placeholder="e.g. A123456"
-            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-orange-500 transition-all"
+            onChange={(e) => setClientId(e.target.value.toUpperCase())}
+            placeholder="e.g. A123456 (NOT your email)"
+            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-orange-500 transition-all uppercase"
           />
         </div>
-        <PasswordField label="Trading Password" value={password}   onChange={setPassword}   placeholder="Your trading PIN" />
-        <PasswordField label="TOTP Secret"      value={totpSecret} onChange={setTotpSecret} placeholder="Base32 TOTP secret from Angel One" />
+        <PasswordField
+          label="Trading MPIN (4-digit PIN)"
+          value={password}
+          onChange={(v) => setPassword(v.replace(/\D/g, "").slice(0, 6))}
+          placeholder="4-digit MPIN · NOT your web login password"
+        />
+        <PasswordField
+          label="TOTP Secret (base32)"
+          value={totpSecret}
+          onChange={setTotpSecret}
+          placeholder="JBSWY3DPEHPK3PXP… · NOT the rotating 6-digit code"
+        />
+
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-[11px] text-amber-200/90 leading-relaxed">
+          <p className="font-bold text-amber-200 mb-1">⚠ Common pitfalls (read this first):</p>
+          <ul className="list-disc pl-4 space-y-0.5">
+            <li><strong>MPIN, not password</strong> — SmartAPI rejects the web login password.</li>
+            <li><strong>TOTP Secret, not code</strong> — paste the long base32 string from smartapi.angelone.in/enable-totp, not the 6-digit code from your authenticator.</li>
+            <li><strong>SmartAPI key</strong> — generate it at smartapi.angelone.in → My Apps, not the trading API.</li>
+          </ul>
+        </div>
 
         <div className="flex items-center gap-2 pt-1">
           <a

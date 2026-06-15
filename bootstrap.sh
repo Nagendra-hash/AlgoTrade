@@ -42,6 +42,7 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='tradeai'" 2
 
 # 5. Run Alembic migrations (idempotent — alembic skips already-applied revisions)
 cd /app/backend
+/root/.venv/bin/pip install -q -r requirements.txt 2>/dev/null || true
 /root/.venv/bin/alembic upgrade head >/dev/null 2>&1 || log "alembic upgrade failed (non-fatal)"
 
 # 6. Seed demo user (idempotent — script checks existence before insert)

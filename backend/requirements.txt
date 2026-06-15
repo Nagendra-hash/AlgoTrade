@@ -40,3 +40,4 @@ sendgrid==6.12.5
 
 # Utilities
 python-dotenv==1.0.1
+pyotp==2.9.0
