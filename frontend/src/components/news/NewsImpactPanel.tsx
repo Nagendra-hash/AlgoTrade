@@ -11,9 +11,11 @@ interface ImpactItem {
   category: string; impact_direction: "positive" | "negative" | "neutral"; confidence: number;
   sentiment_score: number; affected_stocks: string[]; affected_sectors: string[];
   opportunity_summary: string;
+  ai_powered?: boolean; ai_provider?: string; ai_model?: string;
 }
 interface Resp {
   articles_analyzed: number;
+  ai_analyzed?: number;
   items: ImpactItem[];
   top_stocks: { symbol: string; mentions: number }[];
   top_sectors: { sector: string; mentions: number }[];
@@ -38,7 +40,11 @@ export function NewsImpactPanel() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <p className="text-[11px] font-bold text-amber-300 uppercase tracking-widest">News Impact Analysis</p>
-          <p className="text-gray-500 text-xs mt-1">{data?.articles_analyzed ?? 0} articles analysed · sentiment + sector + stock impact</p>
+          <p className="text-gray-500 text-xs mt-1">
+            {data?.articles_analyzed ?? 0} articles analysed
+            {data?.ai_analyzed ? <> · <span className="text-emerald-400 font-semibold">{data.ai_analyzed} AI-powered</span></> : null}
+            {" "}· sentiment + sector + stock impact
+          </p>
         </div>
         <button onClick={() => refetch()} disabled={isFetching} data-testid="news-impact-refresh"
           className="inline-flex items-center gap-2 px-3 py-2 bg-gray-900 border border-gray-800 hover:border-amber-500/40 text-white rounded-lg text-xs font-semibold disabled:opacity-50">
@@ -93,6 +99,11 @@ export function NewsImpactPanel() {
                     <span className="text-[10px] font-bold uppercase text-gray-500 tracking-wider">{it.source}</span>
                     <span className="text-[10px] text-gray-600">{new Date(it.published_at).toLocaleString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}</span>
                     <span className="text-[10px] font-bold uppercase text-amber-300/80 tracking-wider">{it.confidence}% confidence</span>
+                    {it.ai_powered && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" data-testid={`news-impact-ai-badge-${it.id}`}>
+                        AI · {it.ai_provider ?? "model"}
+                      </span>
+                    )}
                   </div>
                   <a href={it.url} target="_blank" rel="noreferrer" className="text-white font-bold text-sm hover:text-amber-300 transition-colors line-clamp-2">
                     {it.headline}

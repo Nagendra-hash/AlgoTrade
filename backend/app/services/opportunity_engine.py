@@ -22,6 +22,7 @@ import httpx
 from app.services.stock_screener import stock_screener, NSE_TO_YF, SCREENING_UNIVERSE
 from app.services.news_service import news_service, SECTOR_MAP
 from app.services.sentiment_service import sentiment_service
+from app.services.fundamentals_service import get_fundamentals_bulk
 from app.api.v1.market import _fetch_quote_sync, YF_BASE, YF_HEADERS  # reuse Yahoo helper
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,9 @@ async def build_opportunities(limit: int = 25, db=None) -> dict:
     range_results = await asyncio.gather(*[_fetch_52w(s, y) for s, y in zip(symbols, yf_syms)])
     range_map = {sym: (hi, lo) for sym, hi, lo in range_results}
 
+    # 4. Fundamentals (market_cap + promoter / FII / DII %) — cached 12h in Redis
+    fund_map = await get_fundamentals_bulk(list(zip(symbols, yf_syms)))
+
     items = []
     for s in screened:
         sym = s["symbol"]
@@ -144,6 +148,7 @@ async def build_opportunities(limit: int = 25, db=None) -> dict:
         confidence = round(min(100, max(5, composite * 0.6 + abs(sent_score) * 0.4)), 1)
         action = _recommended_action(composite, sent_score)
         hi52, lo52 = range_map.get(sym, (None, None))
+        fund = fund_map.get(sym, {}) or {}
 
         items.append({
             "symbol":         sym,
@@ -155,11 +160,11 @@ async def build_opportunities(limit: int = 25, db=None) -> dict:
             "sentiment_score": sent_score,
             "bullish_score":  bullish,
             "bearish_score":  bearish,
-            # Fundamentals not yet wired to a real data source — explicit null = "—" in UI
-            "promoter_holding": None,
-            "fii_holding":      None,
-            "dii_holding":      None,
-            "market_cap":       None,
+            # Fundamentals — real values from NSE + Yahoo (None when source is unreachable)
+            "promoter_holding": fund.get("promoter_holding"),
+            "fii_holding":      fund.get("fii_holding"),
+            "dii_holding":      fund.get("dii_holding"),
+            "market_cap":       fund.get("market_cap"),
             "sector":           SECTOR_MAP.get(sym, "Other"),
             "rsi":              s.get("rsi"),
             "macd":             s.get("macd"),
