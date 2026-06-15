@@ -7,7 +7,7 @@
 
 ## Backend
 - Local URL: `http://localhost:8001`
-- External URL: `https://pro-quant-trading.preview.emergentagent.com`
+- External URL: `https://func-test.preview.emergentagent.com`
 - API prefix: `/api/v1`
 - Auth: JWT Bearer token from `POST /api/v1/auth/login`
 

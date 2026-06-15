@@ -10,7 +10,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "REACT_APP_BACKEND_URL",
-    "https://pro-quant-trading.preview.emergentagent.com",
+    "https://func-test.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api/v1"
 
