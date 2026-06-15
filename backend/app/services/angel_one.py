@@ -277,8 +277,11 @@ async def login(api_key: str, client_id: str,
 
     import pyotp, base64
     try:
-        # Validate base32 by attempting to decode (pyotp does this lazily)
-        base64.b32decode(totp_secret.upper(), casefold=True)
+        # Validate base32 by attempting to decode. Most TOTP issuers (Angel One
+        # included) emit unpadded secrets, so pad to the next multiple of 8 before
+        # decoding — otherwise b32decode raises on length 26/16/etc.
+        padded = totp_secret.upper() + "=" * ((8 - len(totp_secret) % 8) % 8)
+        base64.b32decode(padded, casefold=True)
         totp = pyotp.TOTP(totp_secret).now()
     except Exception:
         return {"success": False, "error":
