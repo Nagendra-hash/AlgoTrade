@@ -1,0 +1,41 @@
+{
+  "summary": "Frontend e2e testing for TradeAI focused algo platform after Phase 1-6 cleanup. ALL 13 requested flows PASSED. Verified: demo login -> /dashboard; sidebar shows exactly 4 groups (TRADE/EXECUTION/INTELLIGENCE/ACCOUNT) and exactly 12 nav items with all required data-testids; no removed pages (admin/backtest/geo-monitor/marketplace/risk/auto-trade) present; Trading Opportunities page renders opportunities-root + opportunities-table with 30 rows + opportunities-ai-panel, Buy filter cuts 30->10 rows; AI Models shows all 9 provider cards (openai/anthropic/gemini/openrouter/groq/deepseek/mistral/perplexity/ollama), editor modal opens with anthropic, save (empty api_key) creates ai-config-row-anthropic, ai-test-anthropic produces ai-test-result banner, ai-delete-anthropic removes the row; Watchlist shows all 5 default cards (RELIANCE/TCS/INFY/HDFCBANK/SBIN) with live Yahoo ₹ prices in <3s, WIPRO add works; Positions shows positions-empty with 'Connect Broker' CTA; Alerts & News Impact tab renders news-impact-panel + news-impact-list with 30 articles analysed; Dashboard renders dashboard-root with dashboard-indices-empty (markets closed), 3 em-dash placeholders in stat cards, NO fake portfolio numbers (1,284,500 / 42,180 / 8,240) anywhere on page; Holdings count shows 0 as expected for demo user without broker.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/v1/ai-models/test (anthropic, claude-sonnet-4-6)", "issue": "Returns an error banner with text: \"No module named 'openai.types.chat.chat_completion_prediction_content_param'\" -- likely an openai SDK version mismatch in the test probe path. UI handles it gracefully (banner shown, no crash), and the spec explicitly allows ok-or-error. Worth fixing on backend so the connection probe actually returns ok=true for the universal-key flow."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_3.json (prior backend audit)",
+    "/app/backend/tests/test_iter3_audit.py"
+  ],
+  "action_items": [
+    "(Optional) Investigate the AI Models /test backend path: 'No module named openai.types.chat.chat_completion_prediction_content_param' -- suggests a stale openai SDK call (likely passing a `prediction` param) that needs to be removed or guarded behind a try/except. Not blocking per the iter4 spec but should return ok=true via the universal EMERGENT_LLM_KEY fallback for a cleaner UX."
+  ],
+  "critical_code_review_comments": [
+    "Sidebar.tsx correctly groups the 12 nav items into 4 sections and exposes the required data-testid attributes on every link -- excellent testability.",
+    "Trading Opportunities page: opportunities-root + opportunities-table + per-row opp-row-{SYMBOL} + opportunities-ai-panel + opp-filter-buy testids are all wired up. First fetch was well under the 60s budget (table populated within ~3s on this run).",
+    "AI Models page: full CRUD UX works end-to-end through the UI -- provider grid -> editor modal -> chain row -> test probe -> delete. The test result banner correctly surfaces both ok and error outcomes without crashing.",
+    "Watchlist: live Yahoo Finance prices render within the 5s refresh budget, search + add flow produces the new watchlist-card-WIPRO immediately.",
+    "Positions: clean 'Connect Broker' empty state via positions-empty testid -- matches the 'no fake data' invariant.",
+    "Dashboard: NO hardcoded portfolio numbers (1,284,500 / 42,180 / 8,240) anywhere -- the 3 ₹ stat cards correctly degrade to '—' when holdings_count == 0, and the indices ticker correctly switches to dashboard-indices-empty when no live data. This is exactly the 'real-only' contract from phase 2.",
+    "All 6 removed routes (admin/backtest/geo-monitor/marketplace/risk/auto-trade) are absent from both the sidebar and the route folders -- cleanup is consistent across UI + filesystem."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (15/15 from iter3, untouched)",
+    "frontend": "100% (13/13 flows verified)"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test cycle created and deleted 1 anthropic AI model config; also added WIPRO to the demo user's watchlist (not cleaned up -- 6 cards now visible instead of 5 on next login).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend testing complete for iter4. All 13 user-requested flows passed. The only finding is a minor backend bug in POST /api/v1/ai-models/test where the openai SDK throws ImportError for 'openai.types.chat.chat_completion_prediction_content_param' -- the UI surfaces this as an error banner rather than a successful probe. Spec explicitly tolerates this (ok or error both acceptable). If main agent fixes the SDK path, retest only that single flow (click ai-test-anthropic after save and verify the banner says 'ok' instead of the import error). Note: WIPRO was added to demo user's watchlist during testing and not removed -- consider clearing if a clean default state is needed for the next iter.",
+  "rca_of_the_issue": "Re: AI Models /test ImportError -- the openai Python SDK has shuffled its `openai.types.chat` submodules across recent releases. Some versions removed/renamed `chat_completion_prediction_content_param`. The probe code path likely imports it eagerly (or constructs a request that triggers the lazy import) instead of using the emergentintegrations universal-key wrapper. Mitigation: route the /test probe through emergentintegrations (which is already used elsewhere per iter3 notes) or pin openai to a version that still ships that submodule, or wrap the import in try/except and fall back."
+}
