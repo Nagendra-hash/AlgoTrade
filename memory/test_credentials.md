@@ -29,3 +29,9 @@
 ## Notes
 - `EMERGENT_LLM_KEY` is left blank in this env — AI features will use rule-based fallback (no AI provider keys provided).
 - Brokers (Angel One / Zerodha) are NOT connected — endpoints requiring broker session will return `no_live_data` or empty.
+
+## Live integrations wired (iter8)
+- **OpenAI**: `OPENAI_API_KEY` in `backend/.env` — sentiment + strategy fall back to `gpt-4o-mini` direct API when no Emergent key. Current key is valid but quota-exhausted (HTTP 429 `insufficient_quota` — needs billing top-up at https://platform.openai.com/settings/organization/billing).
+- **Angel One** (broker): connected as `N513357` via `POST /api/v1/brokers/angel-one/connect`. Session stored in `broker_connections` table. Portfolio / Positions now flow live data (currently 0 holdings for this client).
+- **Telegram**: bot token + chat_id saved on demo user via `PUT /api/v1/users/me`. Verified by creating an alert with `channels:["in_app","telegram"]` — alert engine fired and `POST api.telegram.org/.../sendMessage` returned 200 OK.
+- **OpenRouter**: already listed as a provider in `/api/v1/ai-models/providers`. To enable, user must hit `POST /api/v1/ai-models` with `{"provider":"openrouter","api_key":"<sk-or-...>","is_active":true}`.

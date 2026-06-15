@@ -113,3 +113,22 @@ Full re-test after env recreate (Postgres + Redis re-installed, .env files re-cr
 - P3: `SentimentBadge` renders `<button>` nested inside another `<button>` → React hydration warning
 - P3: `Invalid language tag: en-US@posix` runtime error on some pages (normalise locale before passing to `Intl`)
 - P3: Portfolio header still says "Showing real portfolio data from Angel One ()" when broker is disconnected — show "Broker not connected" instead
+
+## Iter8 — live integration wiring (2026-06-15)
+
+### Added
+- **OpenAI direct fallback** in `backend/app/services/sentiment_service.py` (`_openai_direct`) and `backend/app/api/v1/strategy.py`. When `EMERGENT_LLM_KEY` is absent but `OPENAI_API_KEY` is set, both endpoints call `gpt-4o-mini` directly. Currently 429-blocked by quota on the supplied key.
+- **OpenAI direct path** in `backend/app/services/ai_router.py` (`_call_openai_direct`) — when user's `cfg.api_key` starts with `sk-`, the router calls `api.openai.com/v1/chat/completions` directly instead of going through `emergentintegrations.LlmChat`.
+- **Telegram alerts**: per-user `telegram_bot_token` + `telegram_chat_id` stored on the demo user. Alert engine already wires this — verified end-to-end (Telegram API HTTP 200, message delivered to user's phone).
+
+### Fixed (low-priority items from iter7)
+- `SentimentBadge` no longer renders `<button>` inside `<button>` (changed wrapper to `<span role="button">`).
+- `toLocaleTimeString()` in SentimentBadge now explicitly passes `"en-IN"` to avoid `en-US@posix` `Intl` errors.
+- Portfolio header now distinguishes 3 states: `Live data from Angel One · {client_id}` / `Broker connected — waiting for live holdings` / `Broker not connected — connect Angel One in Settings`.
+
+### Broker live
+- Angel One connected for demo user as `N513357` (session in `broker_connections` table, persistent across restarts).
+
+### Open
+- OpenAI quota top-up still needed by user before AI sentiment/strategy go live.
+- OpenRouter key not yet provided — once user hands over `sk-or-...`, register via `POST /api/v1/ai-models`.
