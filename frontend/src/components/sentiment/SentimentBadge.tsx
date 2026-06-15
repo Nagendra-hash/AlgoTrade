@@ -81,7 +81,7 @@ function TooltipContent({ symbol }: { symbol: string }) {
 
       {data.cached_at && (
         <p className="text-gray-700 text-[10px] text-right">
-          Updated {new Date(data.cached_at).toLocaleTimeString()}
+          Updated {new Date(data.cached_at).toLocaleTimeString("en-IN")}
         </p>
       )}
     </div>
@@ -108,17 +108,19 @@ export function SentimentBadge({ symbol, size = "md", showTooltip = true }: Prop
 
   return (
     <div className="relative inline-block">
-      <button
+      <span
+        role={showTooltip ? "button" : undefined}
+        tabIndex={showTooltip ? 0 : undefined}
         onMouseEnter={() => showTooltip && setTooltip(true)}
         onMouseLeave={() => setTooltip(false)}
-        className={cn("flex items-center gap-1.5 rounded-full border font-semibold transition-all",
+        className={cn("inline-flex items-center gap-1.5 rounded-full border font-semibold transition-all",
           showTooltip && "cursor-pointer hover:opacity-80",
           !showTooltip && "cursor-default",
           colorClass, sizeClass)}>
         <Icon label={data.label} />
         <span className="capitalize">{data.label}</span>
         <span className="opacity-70">({data.score > 0 ? "+" : ""}{data.score})</span>
-      </button>
+      </span>
 
       {showTooltip && tooltipOpen && (
         <div className="absolute z-50 bottom-full mb-2 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl animate-fade-in">

@@ -104,6 +104,32 @@ async def _emergent_llm(symbol: str, headlines: List[str]) -> Optional[dict]:
         return None
 
 
+async def _openai_direct(symbol: str, headlines: List[str]) -> Optional[dict]:
+    """Sentiment via direct OpenAI Chat Completions (fallback when no Emergent key)."""
+    api_key = settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
+        prompt = f"Stock: {symbol}\n\nHeadlines:\n" + "\n".join(f"- {h}" for h in headlines[:10])
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=400,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        return json.loads(raw)
+    except Exception as e:
+        logger.error(f"OpenAI direct sentiment {symbol}: {e}")
+        return None
+
+
 class SentimentService:
     async def get_sentiment(
         self,
@@ -135,6 +161,7 @@ class SentimentService:
 
         analysis = (
             await _emergent_llm(symbol, headlines)
+            or await _openai_direct(symbol, headlines)
             or _rule_based(symbol, headlines)
         )
 

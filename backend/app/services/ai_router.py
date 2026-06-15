@@ -115,7 +115,38 @@ async def _call_openai_compatible(cfg: AIModelConfig, prompt: str, system_prompt
     return (data["choices"][0]["message"]["content"] or "").strip()
 
 
+async def _call_openai_direct(cfg: AIModelConfig, prompt: str, system_prompt: Optional[str] = None) -> str:
+    """Direct OpenAI Chat Completions — used when user has supplied their own sk-* key
+    (i.e. not the Emergent Universal Key)."""
+    api_key = cfg.api_key
+    if not api_key:
+        raise RuntimeError("API key required for openai direct call")
+
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=api_key)
+    messages = []
+    if system_prompt or cfg.system_prompt:
+        messages.append({"role": "system", "content": system_prompt or cfg.system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    # Map "gpt-5.4" → "gpt-4o" for direct API since gpt-5.4 only exists via emergentintegrations alias.
+    model = cfg.model or DEFAULT_MODELS["openai"]
+    if model in {"gpt-5.4", "gpt-5", "gpt-5.2"}:
+        model = "gpt-4o"
+
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=cfg.temperature or 0.3,
+        max_tokens=cfg.max_tokens or 2048,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
 async def _call_provider(cfg: AIModelConfig, prompt: str, system_prompt: Optional[str] = None) -> str:
+    if cfg.provider == "openai" and cfg.api_key and cfg.api_key.startswith("sk-"):
+        # User supplied a real OpenAI key — go direct.
+        return await _call_openai_direct(cfg, prompt, system_prompt)
     if cfg.provider in EMERGENT_PROVIDERS:
         return await _call_emergent(cfg, prompt, system_prompt)
     if cfg.provider in OPENAI_COMPAT_BASES or cfg.provider == "ollama":

@@ -110,6 +110,27 @@ async def _generate_ai(prompt: str, symbols: list, timeframe: str) -> dict:
         except Exception as e:
             logger.error(f"Emergent LLM strategy generation: {e}")
 
+    # Fallback: direct OpenAI Chat Completions
+    openai_key = settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=openai_key)
+            resp = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": STRATEGY_SYSTEM_PROMPT},
+                    {"role": "user",   "content": full_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            return json.loads(raw)
+        except Exception as e:
+            logger.error(f"OpenAI direct strategy generation: {e}")
+
     return FALLBACK_STRATEGY
 
 

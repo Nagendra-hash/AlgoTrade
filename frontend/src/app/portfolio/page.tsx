@@ -56,7 +56,7 @@ export default function PortfolioPage() {
   const { data: brokerStatus } = useBrokerStatus();
 
   const holdings = holdingsResp?.holdings ?? [];
-  const isReal   = holdingsResp?.is_real  ?? false;
+  const isReal   = (holdingsResp?.is_real ?? false) && !!holdingsResp?.client_id;
   const source   = holdingsResp?.source   ?? "sample";
 
   const angelConnected = (brokerStatus ?? []).some(
@@ -83,7 +83,7 @@ export default function PortfolioPage() {
       icon: Briefcase,
       color: "text-blue-400",
       bg: "bg-blue-500/10",
-      sub: isReal ? "Live from Angel One" : "Sample data",
+      sub: isReal ? "Live from Angel One" : angelConnected ? "Awaiting data" : "Not connected",
     },
     {
       label: "Total Invested",
@@ -118,7 +118,9 @@ export default function PortfolioPage() {
             <p className="text-gray-400 text-sm mt-0.5">
               {isReal
                 ? `Live data from Angel One · ${holdingsResp?.client_id ?? ""}`
-                : "Sample data — Connect Angel One in Settings for real data"}
+                : angelConnected
+                  ? "Broker connected — waiting for live holdings"
+                  : "Broker not connected — connect Angel One in Settings for live data"}
             </p>
           </div>
           <button onClick={() => refetch()} disabled={isFetching}
