@@ -48,3 +48,10 @@ cd /app/backend
 /root/.venv/bin/python seed_demo.py >/dev/null 2>&1 || log "demo seed skipped (already exists)"
 
 log "Bootstrap OK · Postgres + Redis up · DB migrations applied · demo user ready."
+
+# 7. Kick the backend so it picks up the newly-available DB.
+#    Bootstrap and backend start in parallel under supervisor; if backend
+#    booted before Postgres was ready it will be in a crash-loop until we
+#    restart it here.
+supervisorctl restart backend >/dev/null 2>&1 || true
+log "Backend restarted."

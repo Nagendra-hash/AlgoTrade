@@ -44,7 +44,13 @@ export default function AIModelsPage() {
   const [testResult, setTestResult] = useState<{ id: string; ok: boolean; message: string; latency_ms?: number } | null>(null);
 
   const saveMut = useMutation({
-    mutationFn: (body: any) => api.post("/ai-models", body).then((r) => r.data),
+    mutationFn: (body: any) => {
+      // Strip empty api_key so the backend keeps the existing stored secret.
+      // Sending "" used to nuke the saved key — see ai_models.py upsert_config.
+      const clean = { ...body };
+      if (clean.api_key === "" || clean.api_key == null) delete clean.api_key;
+      return api.post("/ai-models", clean).then((r) => r.data);
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ai-configs"] }); setEditing(null); setForm({}); },
   });
   const delMut = useMutation({
@@ -194,11 +200,32 @@ export default function AIModelsPage() {
                 <Field label="Model">
                   <input data-testid="ai-form-model" value={form.model ?? ""} onChange={(e) => setForm({ ...form, model: e.target.value })} className={inputCls} placeholder={providers.find((p) => p.provider === editing)?.default_model} />
                 </Field>
-                {editing !== "ollama" && (
-                  <Field label="API Key" hint={["openai", "anthropic", "gemini"].includes(editing) ? "Optional — leave blank to use Emergent Universal key" : "Required"}>
-                    <input data-testid="ai-form-key" type="password" autoComplete="off" value={form.api_key ?? ""} onChange={(e) => setForm({ ...form, api_key: e.target.value })} className={inputCls} placeholder="sk-…" />
-                  </Field>
-                )}
+                {editing !== "ollama" && (() => {
+                  const existing = configs.find((c) => c.provider === editing);
+                  const hasStoredKey = Boolean(existing?.api_key_preview);
+                  return (
+                    <Field
+                      label="API Key"
+                      hint={
+                        hasStoredKey
+                          ? `Saved: ${existing?.api_key_preview} · leave blank to keep`
+                          : ["openai", "anthropic", "gemini"].includes(editing)
+                            ? "Optional — leave blank to use Emergent Universal key"
+                            : "Required"
+                      }
+                    >
+                      <input
+                        data-testid="ai-form-key"
+                        type="password"
+                        autoComplete="off"
+                        value={form.api_key ?? ""}
+                        onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                        className={inputCls}
+                        placeholder={hasStoredKey ? "•••••••• (saved · leave blank to keep)" : "sk-…"}
+                      />
+                    </Field>
+                  );
+                })()}
                 {(editing === "ollama" || editing === "openrouter") && (
                   <Field label="Base URL">
                     <input data-testid="ai-form-base-url" value={form.base_url ?? ""} onChange={(e) => setForm({ ...form, base_url: e.target.value })} className={inputCls} placeholder={editing === "ollama" ? "http://localhost:11434" : "https://openrouter.ai/api/v1"} />

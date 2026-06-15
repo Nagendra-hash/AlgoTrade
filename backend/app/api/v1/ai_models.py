@@ -124,8 +124,11 @@ async def upsert_config(
     model_name = payload.model or DEFAULT_MODELS[payload.provider]
     if cfg:
         cfg.label = payload.label
-        if payload.api_key is not None:
-            cfg.api_key = payload.api_key or None
+        # Only overwrite the stored api_key when the client sends a NEW non-empty value.
+        # Empty string ("") is treated as "do not change" so editing other fields
+        # without retyping the secret does not wipe it.
+        if payload.api_key:
+            cfg.api_key = payload.api_key
         cfg.base_url = payload.base_url
         cfg.model = model_name
         cfg.temperature = payload.temperature
