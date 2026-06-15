@@ -1,0 +1,58 @@
+{
+  "summary": "Iter7 full functional re-test after main agent's Postgres+Redis supervisor fix. BACKEND: 20/20 PASSED on /app/backend/tests/test_iter6_full_smoke.py against external URL (auth signup+login, /users/me, market indices/quote/candles/search, portfolio/positions/funds invariants source=none + no_live_data=true, orders, alerts CRUD with pause/resume, notifications, news feed + impact, sentiment, strategy generate+list, opportunities, ai-models CRUD). FRONTEND: login (demo@tradeai.com / Demo1234!) redirects to /dashboard, topbar shows 'demo_trader / demo@tradeai.com', all 12 sidebar routes navigate (Dashboard, Markets, Watchlist, Trading Opportunities, Orders, Positions, Portfolio, Alerts & News, Strategies, AI Assistant, AI Models, Broker Settings) — zero 404s. Portfolio/Positions/Funds show empty-state (₹0.00 + 'No holdings found' / 'No live data available') with ZERO occurrences of the forbidden fake numbers 1,284,500 / 8,240 / 42,180. Trading Opportunities table renders all required columns (SYMBOL/LTP/VOLUME/RSI/MACD/RISK/CONF[idence]) plus extras. AI Models page shows 9-provider grid (OpenAI/Anthropic/Gemini/OpenRouter/Groq/DeepSeek/Mistral/Perplexity/Ollama) with Primary&Fallback chain UI. Alerts & News renders feed + Impact tab. Two non-blocking console issues observed (see below).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "SentimentBadge",
+        "issue": "React hydration warning: '<button> cannot be a descendant of <button>'. SentimentBadge renders a <button> that is itself nested inside another <button> element. Functional but produces a hydration warning on every page that displays sentiment.",
+        "selector": "SentimentBadge (likely on dashboard MarketMood / opportunities table)",
+        "priority": "LOW"
+      },
+      {
+        "component": "Portfolio header copy",
+        "issue": "Portfolio page subtitle says 'Showing real portfolio data from Angel One ()' even when broker is disconnected. The empty-state itself is correct (₹0.00 + 'No holdings found') but the green success banner + 'Live data from Angel One' label is misleading when no broker is connected. The topbar correctly shows 'Disconnected'.",
+        "selector": ".portfolio header / source banner",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Browser locale -> Intl",
+        "issue": "Two unhandled page errors: 'Invalid language tag: en-US@posix'. Some code path (likely Intl.NumberFormat or date-fns) is being called with the raw POSIX locale string instead of normalising to 'en-US'. Not blocking but emits a runtime exception during navigation.",
+        "affected_selectors": ["global - emitted on multiple pages"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_full_smoke.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [
+    "Fix SentimentBadge nested-button hydration warning (use a <span role='button'> or restructure so the badge is not inside a parent <button>).",
+    "Normalise locale before passing to Intl APIs: strip '@posix' suffix or default to 'en-US' when navigator.language returns 'en-US@posix'. Currently throws 'Invalid language tag' page error.",
+    "Portfolio page: when broker is disconnected, do NOT show the green 'Showing real portfolio data from Angel One ()' banner with empty parentheses; show 'Broker not connected' instead so the user isn't told fake data is 'live'."
+  ],
+  "critical_code_review_comments": [
+    "Postgres + Redis are now both supervisor-managed (/etc/supervisor/conf.d/supervisord_datastores.conf) — iter6 single point of failure is fully resolved. supervisorctl status confirms postgresql + redis + backend + frontend + mongodb + nginx-code-proxy all RUNNING.",
+    "Phase-2 'no fake data' invariant holds end-to-end: backend returns source='none' + no_live_data=true, frontend renders ₹0.00 / 'No holdings found' / '—'. None of the forbidden numbers 1,284,500 / 8,240 / 42,180 appear anywhere in the UI.",
+    "Backend test_iter6_full_smoke.py covers 20 endpoints in 12.4s and is a strong regression suite to keep running going forward.",
+    "Minor: Portfolio page copy assumes Angel One is connected even when it isn't — UX nit, not a contract bug.",
+    "Minor: SentimentBadge nested-button is a real DOM-validity issue and should be fixed to keep React strict-mode + accessibility clean."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (20/20 pytest)",
+    "frontend": "95% — all 12 routes load, login works, empty-states correct, only 2 minor console warnings"
+  },
+  "test_credentials": "demo@tradeai.com / Demo1234! (from /app/memory/test_credentials.md) — verified valid.",
+  "seed_data_creation": "1 throwaway signup user created via /api/v1/auth/signup during pytest run (smoke_<hex>@test.com); 1 ai-models config created+deleted in-test. No persistent test data left.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter7 confirms iter6 blocker (Postgres down) is fully resolved by main agent's supervisor fix. App is functionally GREEN. Only 3 LOW-priority items remain: (1) SentimentBadge nested <button>, (2) 'Invalid language tag: en-US@posix' Intl error, (3) Portfolio's 'Showing real portfolio data from Angel One ()' banner is shown even when broker is disconnected. None of these block any user flow.",
+  "rca_of_the_issue": "Iter6's only critical (Postgres process not running) was resolved by main agent adding Postgres + Redis to /etc/supervisor/conf.d/supervisord_datastores.conf so they auto-restart. Verified via `supervisorctl status` (postgresql RUNNING, redis RUNNING) and 20/20 backend pytest GREEN on the same external URL that returned 502 in iter6. No code change was needed — purely a process-supervision fix."
+}
